@@ -20,51 +20,31 @@
 	// Releases all the resources
 #define CRUISE_END 6
 
-/*
-	// 3) Lista ID wszystkich procesów
-	std::vector<int> process_list;
-	
-	// 4) Liczba dostępnych strojów
-	int costumes;
-	
-	// 5) Stan posiadania stroju (posiada / nie posiada)
-	bool have_costume;
-	
-	// 6) Lista łodzi
-	std::vector<s_boat> boats_list;
-	
-	// 8) Stan zegara Lamporta
-	int clock;
-	std::mutex clock_mutex;
-	bool running;
-	
-*/
-
 
 Tourist::Tourist(int costumes, int boats, int tourists, int max_capacity) {
-	//state = "PENDING";
 	
 	size = MPI::COMM_WORLD.Get_size();
 	rank = MPI::COMM_WORLD.Get_rank();
 	
-	// srand(time(nullptr) + rank);
+	// this.state = 0; // "PENDING"
+	// this.process_list = null; // ???
+	// this.costumes = costumes;
+	// this.have_costume = 0;
+	// this.boats_list = null; // ???
+	// need to change for pointer, to let every process use the same?
 	
-	// std::vector<int> process_list;
-	
-	this.costumes = costumes;
-	
-	have_costume = 0;
-	
-	boats_list = null; // zastanowić się nad dodaniem wskaźnika
-	
-	clock = 0;
-	
+	// this.clock = 0;
+	// this.clock_mutex = new mutex; // ???
+	// this.running = 0; // ???
 }
 
 void Tourist::createMonitorThread() {
 	new std::thread(&Tourist::monitorThread, this);
 }
 
+/** TODO: add proper actions to tags
+ * Function to manage received MPI messages.
+ */
 void Tourist::monitorThread() {
 	while(running) {
 		s_request result;
@@ -77,7 +57,7 @@ void Tourist::monitorThread() {
 		
 		switch(status.MPI_TAG) {
 			case LAUNCH:
-				// status: INIT -> PENDING
+			
 				break;
 				
 			case COSTUME_REQ:
@@ -113,7 +93,7 @@ void Tourist::monitorThread() {
 }
 
 
-/** ****DONE****
+/** >>Done<<
  * Function creates and returns a new request.
  */
 s_request Tourist::create_request(int value) {
@@ -146,10 +126,48 @@ void Tourist::runPerformThread() {
 	}
 }
 
-
+/** >>Done<<
+ * Function broadcasting request to every proccess.
+ */
 void Tourist::broadcastRequest(s_request *request, int request_type) {
 	for (int i = 0; i < size; i++)
 		if (i != rank)
 			MPI_Send(request, sizeof(s_request), MPI_BYTE, i, request_type, MPI_COMM_WORLD);
+}
+
+/** >>Done<< (in theory should be alright)
+ * Adding request to local list of events.
+ */
+void Tourist::addToLamportVector(s_lamport_vector *lamport, s_request *request) {
+	vector -> edit_mutex.lock();
+	std::vector<s_request>::iterator it;
+	
+	for (it = lamport -> vector.begin(); it < lamport -> vector.end(); it++) {
+		if (it->clock > request->clock) {
+			break;
+		}
+		// setting priority for the same times
+		if (it->clock == request->clock && it->sender_id > request->sender_id) {
+			break;
+		}
+	}
+	vector -> vector.insert(it, *request);
+	vector -> edit_mutex.unlock();
+}
+
+/** >>Done<< (as above)
+ * Removing first spotted request in local list of events.
+ */
+void Tourist::removeFromLamportVector(s_lamport_vector *lamport, int sender) {
+	vector -> edit_mutex.lock();
+	std::vector<s_request>::iterator it;
+	
+	for (it = lamport -> vector.begin(); it < lamport -> vector.end(); it++) {
+		if (it->sender_id == sender) {
+			vector -> vector.erase(it);
+			break;
+		}
+	}
+	vector -> edit_mutex.unlock();
 }
 
