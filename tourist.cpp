@@ -160,6 +160,7 @@ bool Tourist::handleResponse(s_request *result, MPI_Status status) {
 					}
 					ack = 0;
 					s_request boat_request = create_request(x);
+					boat_request.clock = last_request_clock;
 					broadcastRequest(&boat_request, BOAT_REQ);
 					
 					break;
@@ -187,7 +188,7 @@ bool Tourist::handleResponse(s_request *result, MPI_Status status) {
 					}
 					break;
 				case CRUISE_END: 
-					// TODO: cleanup code
+					event_mutex.unlock();
 					break;
 				default:
 					resolved = false;
@@ -292,6 +293,7 @@ void Tourist::runPerformThread() {
 		printf("[Rank: %d|Clock: %d]: %s\n", rank, clock, "Request for boat");
 		ack = 0;
 		s_request boat_request = create_request(capacity);
+		last_request_clock = boat_request.clock;
 		broadcastRequest(&boat_request, BOAT_REQ);
 		
 		// 6. receive boat ACK -> get a boat
@@ -320,8 +322,13 @@ void Tourist::runPerformThread() {
 		setState(ON_BOAT);
 
 		// 7. cruise
+		event_mutex.lock();
+
 		// 8. release the boat
+		boat_id = -1;
+
 		// 9. release costume and start over
+		have_costume = 0;
 	}
 }
 
