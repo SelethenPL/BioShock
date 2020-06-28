@@ -1,4 +1,3 @@
-// running as boolean in class?
 #include <mpi.h>
 #include <chrono>
 #include <thread>
@@ -21,33 +20,166 @@
 	// Releases all the resources
 #define CRUISE_END 6
 
-#define PENDING 100
-#define SUIT_CRITICAL 101
-#define BOAT_CRITICAL 102
-#define ON_BOAT 103
+#define INIT 100
+#define PENDING 101
+#define SUIT_CRITICAL 102
+#define BOAT_CRITICAL 103
+#define ON_BOAT 104
 
 Tourist::Tourist(int costumes, int boats, int tourists, int max_capacity) {
 	
 	size = MPI::COMM_WORLD.Get_size();
 	rank = MPI::COMM_WORLD.Get_rank();
 	
-	// this.state = PENDING;
-	// this.process_list = null; // ???
-	// this.costumes = costumes;
-	// this.have_costume = 0;
-	// this.boats_list = null; // ???
-	// need to change for pointer, to let every process use the same?
+	this.state = INIT;
+	for (int i = 0; i < size; i++) {
+		this.process_list.push_back(i);
+	}
+	this.costumes = costumes;
+	this.have_costume = 0;
+	// this.boats_list -> below;
 	
-	// this.clock = 0;
-	// this.clock_mutex = new mutex; // ???
-	// this.running = 0; // ???
+	this.clock = 0;
+	this.event_mutex.lock();
+	this.running = true;
+	this.request_id = 0;
+	
+	// proces madka
+	if (rank == 0) {
+		
+		for (int i = 0; i < boats; i++) {
+			s_boat boat;
+			boat.id = id;
+			boat.capacity = rand()%10+10; // 10-20
+			boat.state = 0;
+			boats_list.push_back(boat);
+		}
+		
+		for (int i = 1; i < size; i++)
+			MPI_Send(&boats_list, boats, sizeof(s_boat), i, LAUNCH, MPI_COMM_WORLD);
+	} else {
+		MPI_Recv(&boats_list, boats, sizeof(s_boat), MPI_ANY_SOURCE, LAUNCH, MPI_COMM_WORLD, &status);
+	}
+	this.state = PENDING;
 }
 
 void Tourist::createMonitorThread() {
 	new std::thread(&Tourist::monitorThread, this);
 }
 
-/** TODO: add proper actions to tags
+
+bool Tourist::handleResponse(s_request *result, MPI_Status status) {
+	bool resolved = true;
+	switch(state) {
+		case PENDING:
+			switch(status.MPI_TAG) {
+				case COSTUME_REQ:
+					s_request ack = create_request(0);
+					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, status.sender_id, COSTUME_ACK, MPI_COMM_WORLD);
+					break;
+					
+				case BOAT_REQ: // (-1, -1)
+					s_request ack = create_request(-1, -1);
+					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, status.sender_id, BOAT_ACK, MPI_COMM_WORLD);
+					break;
+						
+				default:
+					resolved = false;
+					break;
+			}
+			break;
+		case SUIT_CRITICAL:
+			switch(status.MPI_TAG) {
+				case COSTUME_ACK:
+					ack_mutex.lock();
+					ack++;
+					if (ack >= process_list.size()-costumes) {
+						event_mutex.unlock();
+					}
+					ack_mutex.unlock();
+					break;
+					
+				case COSTUME_REQ:
+					if (result->clock < clock) { // send ok
+						s_request ack = create_request(0);
+						MPI_Send(&ack, sizeof(s_request), MPI_BYTE, status.sender_id, COSTUME_ACK, MPI_COMM_WORLD);
+					}
+					else { // cache
+						addToLamportVector(result);
+					}
+					break;
+					
+				case BOAT_REQ:
+					s_request ack = create_request(-1, -1);
+					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, status.sender_id, BOAT_ACK, MPI_COMM_WORLD);
+					break;
+						
+				default:
+					resolved = false;
+					break;
+			}
+			break;
+		case BOAT_CRITICAL:
+			switch(status.MPI_TAG) {
+				case COSTUME_REQ:
+					addToLamportVector(result);
+					break;
+				case BOAT_REQ:
+					if (result->clock > clock) { // dodaj do tablicy
+						addToLamportVector(result);
+					}
+					else {
+						s_request ack = create_request(-1, -1);
+						MPI_Send(&ack, sizeof(s_request), MPI_BYTE, status.sender_id, BOAT_ACK, MPI_COMM_WORLD);
+					}
+					break;
+				case BOAT_ACK:
+					for (auto x : boats_list) {
+						if (x.id == result->value) {
+							x.occupied += result->value2;
+						}
+					}
+					ack_mutex.lock();
+					ack++;
+					if (ack == process_list.size()) {
+						event_mutex.unlock();
+					}
+					ack_mutex.unlock();
+					break;
+				default:
+					resolved = false;
+					break;
+			}
+			break;
+		case ON_BOAT:
+			switch(status.MPI_TAG) {
+				case COSTUME_REQ:
+					addToLamportVector(result);
+					break;
+				case BOAT_REQ: // TODO
+					int a1 = 0; // boat id
+					int a2 = 0; // size requested for a boat
+					s_request ack = create_request(a1, a2); // (boat id, size)
+					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, status.sender_id, BOAT_ACK, MPI_COMM_WORLD);
+					break;
+				case CRUISE_END: // TODO
+					// change statuses of boat
+					// setState(PENDING);
+					break;
+				default:
+					resolved = false;
+					break;
+			}
+			break;
+		default:
+			resolved = false;
+			break;
+	}
+	return resolved;
+}
+
+
+/** 
  * Function to manage received MPI messages.
  */
 void Tourist::monitorThread() {
@@ -57,93 +189,14 @@ void Tourist::monitorThread() {
 		MPI_Recv(&result, sizeof(s_request), MPI_BYTE, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
 		
 		clock_mutex.lock();
+		result.id = request_id;
+		request_id++;
 		clock = std::max(clock, result.clock) + 1;
 		clock_mutex.unlock();
 		
-		// TODO: Add interactions
-		if (state == PENDING) {
-			switch(status.MPI_TAG) {
-				case COSTUME_REQ:
-					addToLamportVector(&costume_queue, &result);
-					s_request ack = create_request(0);
-					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, status.sender_id, COSTUME_ACK, MPI_COMM_WORLD);
-					break;
-					
-				case BOAT_REQ: // (-1, -1)
-					addToLamportVector(&boat_queue, &result);
-					s_request ack = create_request(-1);
-					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, status.sender_id, BOAT_ACK, MPI_COMM_WORLD);
-					break;
-					
-				default:
-					break;
-			}		
-		}
-		if (state == SUIT_CRITICAL) {
-			switch(status.MPI_TAG) {
-				case COSTUME_ACK:
-					// dłuższy opis
-					// ?????
-					ack_mutex.lock();
-					ack++;
-					ack_mutex.unlock();
-					break;
-					
-				case COSTUME_REQ:
-					// send costume_ack (priorytety)
-					break;
-					
-				case BOAT_REQ: // (-1, -1)
-					addToLamportVector(&boat_queue, &result);
-					s_request ack = create_request(-1);
-					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, status.sender_id, BOAT_ACK, MPI_COMM_WORLD);
-					break;
-					
-				default:
-					break;
-			}
-		}
-		if (state == BOAT_CRITICAL) {
-			switch(status.MPI_TAG) {
-				case COSTUME_ACK:
-					// stop request til costume is released
-					// ????
-					break;
-				case COSTUME_REQ:
-					// stop request (priority of time)
-					// else add to lamport_vector
-					break;
-				case BOAT_REQ:
-					// update array of boat state
-					break;
-				default:
-					break;
-			}
-		}
-		if (state == ON_BOAT) {
-			switch(status.MPI_TAG) {
-				case COSTUME_REQ:
-					// stop request til costume is released
-					// ????
-					break;
-				case BOAT_REQ:
-					addToLamportVector(&boat_queue, &result);
-					int a1 = 0; // boat id
-					int a2 = 0; // size requested for a boat
-					s_request ack = create_request(a1, a2); // (boat id, size)
-					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, status.sender_id, BOAT_ACK, MPI_COMM_WORLD);
-					break;
-				case CRUISE_END:
-					// change statuses of boat
-					// state = PENDING;
-					break;
-				default:
-					break;
-			}
-		}
+		handleResponse(&result, status);
 	}
 }
-
 
 /** >>Done<<
  * Function creates and returns a new request with one value.
@@ -154,7 +207,11 @@ s_request Tourist::create_request(int value) {
 	request.sender_id = rank;
 	
 	clock_mutex.lock();
+	
+	request.id = request_id;
+	request_id++;
 	clock++;
+	
 	clock_mutex.unlock();
 	
 	return request;
@@ -169,6 +226,18 @@ s_request Toutist::create_request(int value, int value2) {
 	return request;
 }
 
+void Tourist::setState(int value) {
+	if (!lamport_vector.empty()) {
+		std::vector<s_request>::iterator it;
+		for (it = lamport_vector.begin(); it < lamport_vector.end(); it++) {
+			bool x = handleResponse(*it, status);
+			if (x) {
+				removeFromLamportVector(it->id);
+			}
+		}
+	}
+	state = value;
+}
 
 void Tourist::runPerformThread() {
 	while(running) {
@@ -178,7 +247,7 @@ void Tourist::runPerformThread() {
 		// 2. wait to spawn
 		
 		std::this_thread::sleep_for(std::chrono::milliseconds((rand()%5000) + 2000));
-		state = SUIT_CRITICAL;
+		setState(SUIT_CRITICAL);
 		
 		// 3. sending costume request
 		
@@ -189,24 +258,14 @@ void Tourist::runPerformThread() {
 		
 		// 4. receive costume ACK for every proc -> get a costume
 		
-		while(true) {
-			// algorithm for costume request
-			ack_mutex.lock();
-			
-			// check for costumes variable
-			if (ack > 10) {
-				printf("[Rank: %d|Clock: %d]: %s\n", rank, clock, "Costume received!");
-				state = BOAT_CRITICAL;
-				have_costume = 1;
-				break;
-			};
-			
-			ack_mutex.unlock();
-		}
+		event_mutex.lock();
+		printf("[Rank: %d|Clock: %d]: %s\n", rank, clock, "Costume received!");
+		setState(BOAT_CRITICAL);
+		have_costume = 1;
 		
 		// 5. sending boat request
 		
-		int x = (rand()%5000) + 2000; // place needed on boat
+		int x = (rand()%5) + 2; // place needed on boat
 		
 		printf("[Rank: %d|Clock: %d]: %s\n", rank, clock, "Request for boat");
 		ack = 0;
@@ -215,19 +274,18 @@ void Tourist::runPerformThread() {
 		
 		// 6. receive boat ACK
 		
-		while(true) {
-			ack_mutex.lock();
-			
-			// TODO: update with boats
-			if (ack > 10) {
-				printf("[Rank: %d|Clock: %d]: %s\n", rank, clock, "Boat received!");
-				printf("Left %d space on boat id: %d.", 0, 0); 
-				state = ON_BOAT;
-				break;
+		for (;;) {
+			event_mutex.lock();
+			for (auto boat : boats_list) {
+				if (boat.status = 0 && boat.capacity - boat.occupied <= x) {
+					
+					setState(ON_BOAT);
+				}
 			}
-			
-			ack_mutex.unlock();
 		}
+		printf("[Rank: %d|Clock: %d]: %s\n", rank, clock, "Boat received!");
+		printf("Left %d space on boat id: %d.", 0, 0); 
+		setState(ON_BOAT);
 		
 		// 7. iterate via all boats -> get a boat
 		
@@ -247,13 +305,13 @@ void Tourist::broadcastRequest(s_request *request, int request_type) {
 }
 
 /** >>Done<< (in theory should be alright)
- * Adding request to local list of events.
+ * Adding cached request to local list of events.
  */
-void Tourist::addToLamportVector(s_lamport_vector *lamport, s_request *request) {
-	lamport -> edit_mutex.lock();
+void Tourist::addToLamportVector(s_request *request) {
+	lamport_mutex.lock();
 	std::vector<s_request>::iterator it;
 	
-	for (it = lamport -> lamport_vector.begin(); it < lamport -> lamport_vector.end(); it++) {
+	for (it = lamport_vector.begin(); it < lamport_vector.end(); it++) {
 		if (it->clock > request->clock) {
 			break;
 		}
@@ -262,23 +320,23 @@ void Tourist::addToLamportVector(s_lamport_vector *lamport, s_request *request) 
 			break;
 		}
 	}
-	lamport -> lamport_vector.insert(it, *request);
-	lamport -> edit_mutex.unlock();
+	lamport_vector.insert(it, *request);
+	lamport_mutex.unlock();
 }
 
 /** >>Done<< (as above)
  * Removing first spotted request in local list of events.
  */
-void Tourist::removeFromLamportVector(s_lamport_vector *lamport, int sender) {
-	lamport -> edit_mutex.lock();
+void Tourist::removeFromLamportVector(int id) {
+	lamport_mutex.lock();
 	std::vector<s_request>::iterator it;
 	
-	for (it = lamport -> lamport_vector.begin(); it < lamport -> lamport_vector.end(); it++) {
-		if (it->sender_id == sender) {
-			lamport -> lamport_vector.erase(it);
+	for (it = lamport_vector.begin(); it < lamport_vector.end(); it++) {
+		if (it->id == id) {
+			lamport_vector.erase(it);
 			break;
 		}
 	}
-	lamport -> edit_mutex.unlock();
+	lamport_mutex.unlock();
 }
 

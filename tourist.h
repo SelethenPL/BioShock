@@ -4,27 +4,6 @@
 #include <chrono>
 #include <thread>
 
-
-typedef struct {
-	int id; // 1) numer na liście
-	int capacity; // 2) pojemność
-	int state; // 3) stan łodzi
-	std::vector<int> tourists_list; // 4) lista pasażerów
-} s_boat;
-
-typedef struct {
-	int value; // 1) typ wiadomości
-	int value2; // 2) zawartość wiadomości
-	int sender_id; // 3) numer id obiektu wysyłającego
-	int clock;
-} s_request;
-
-typedef struct {
-	std::mutex edit_mutex;
-	std::mutex action_mutex;
-	std::vector<s_request> lamport_vector;
-} s_lamport_vector;
-
 class Tourist {
 	
 	// 1) Stan obecnego procesu
@@ -54,10 +33,12 @@ class Tourist {
 	std::mutex clock_mutex;
 	int ack;
 	std::mutex ack_mutex;
+	std::mutex event_mutex;
 	
 	// *) Lista zegarów lamporta
-	s_lamport_vector costume_queue;
-	s_lamport_vector boat_queue;
+	std::vector<s_request> lamport_vector;
+	std::mutex lamport_mutex;
+	int request_id;
 	
 	bool running;
 	
@@ -66,12 +47,15 @@ class Tourist {
 	s_request create_request(int value);
 	s_request create_request(int value, int value2);
 	
-	void addToLamportVector(s_lamport_vector *lamport, s_request *request);
-	void removeFromLamportVector(s_lamport_vector *lamport, int sender);
+	void setState(int value);
+	
+	void handleResponse(s_request *request, MPI_Status status);
+	
+	void addToLamportVector(s_request *request);
+	void removeFromLamportVector(int sender);
 	
 public:
 	Tourist(int costumes, int boats, int tourists, int max_capacity);
 	void createMonitorThread();
 	void runPerformThread();
-	
 }
