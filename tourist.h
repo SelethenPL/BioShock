@@ -3,6 +3,23 @@
 #include <chrono>
 #include <thread>
 
+typedef struct {
+	int id; // 1) numer na liście
+	int capacity; // 2) pojemność
+	int occupied; // 2.1) zajmowana pojemność
+	int state; // 3) stan łodzi
+	std::vector<int> tourists_list; // 4) lista pasażerów
+} s_boat;
+
+typedef struct {
+	int id;
+	int type; // ???
+	int value; // 1) typ wiadomości
+	int value2; // 2) zawartość wiadomości
+	int sender_id; // 3) numer id obiektu wysyłającego
+	int clock;
+} s_request;
+
 class Tourist {
 	
 	// 1) Stan obecnego procesu
@@ -53,13 +70,13 @@ class Tourist {
 	
 	void setState(int value);
 	
-	void handleResponse(s_request *request, MPI_Status status);
-	void finishCruise(int sig);
+	bool handleResponse(s_request *result, int status);
 	void addToLamportVector(s_request *request);
 	void removeFromLamportVector(int sender);
+	void finish_cruise(int sig);
 	
 public:
 	Tourist(int costumes, int boats, int tourists, int max_capacity);
 	void createMonitorThread();
 	void runPerformThread();
-}
+};

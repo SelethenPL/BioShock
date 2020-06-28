@@ -1,6 +1,10 @@
 #include <mpi.h>
 #include <chrono>
 #include <thread>
+#include <cstdio>
+#include <csignal>
+#include <iostream>
+#include <unistd.h>		
 #include "tourist.h"
 
 	// Sent once by main thread
@@ -32,39 +36,38 @@ Tourist::Tourist(int costumes, int boats, int tourists, int max_capacity) {
 	size = MPI::COMM_WORLD.Get_size();
 	rank = MPI::COMM_WORLD.Get_rank();
 	
-	this.state = INIT;
+	this->state = INIT;
 	for (int i = 0; i < size; i++) {
-		this.process_list.push_back(i);
+		this->process_list.push_back(i);
 	}
-	this.costumes = costumes;
-	this.have_costume = 0;
-	// this.boats_list -> below;
+	this->costumes = costumes;
+	this->have_costume = 0;
 	
-	this.clock = 0;
-	this.event_mutex.lock();
-	this.running = true;
-	this.request_id = 0;
+	this->clock = 0;
+	this->event_mutex.lock();
+	this->running = true;
+	this->request_id = 0;
 	
 	// proces madka
 	if (rank == 0) {
 		
 		for (int i = 0; i < boats; i++) {
 			s_boat boat;
-			boat.id = id;
+			boat.id = i;
 			boat.capacity = rand()%10+10; // 10-20
 			boat.state = 0;
 			boats_list.push_back(boat);
 		}
 		
 		for (int i = 1; i < size; i++)
-			MPI_Send(&boats_list, boats, sizeof(s_boat), i, LAUNCH, MPI_COMM_WORLD);
+			MPI_Send(&boats_list, boats, MPI_UNSIGNED_LONG, i, LAUNCH, MPI_COMM_WORLD);
 	} else {
-		MPI_Recv(&boats_list, boats, sizeof(s_boat), MPI_ANY_SOURCE, LAUNCH, MPI_COMM_WORLD, &status);
+		MPI_Recv(&boats_list, boats, MPI_UNSIGNED_LONG, MPI_ANY_SOURCE, LAUNCH, MPI_COMM_WORLD, 0);
 	}
-	this.state = PENDING;
+	this->state = PENDING;
 }
 
-void Tourist::finish_cruise(int sig){
+void Tourist::finish_cruise(int sig) {
 	s_request cruise_end_req = create_request(boat_id);
 	printf("[Rank: %d|Clock: %d]: Boat %d has finished its journey!\n", rank, clock, boat_id);
 	broadcastRequest(&cruise_end_req, CRUISE_END);
@@ -72,154 +75,6 @@ void Tourist::finish_cruise(int sig){
 
 void Tourist::createMonitorThread() {
 	new std::thread(&Tourist::monitorThread, this);
-}
-
-
-bool Tourist::handleResponse(s_request *result, MPI_Status status) {
-	bool resolved = true;
-	switch(state) {
-		case PENDING:
-			switch(status.MPI_TAG) {
-				case COSTUME_REQ:
-					s_request ack = create_request(0);
-					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, status.sender_id, COSTUME_ACK, MPI_COMM_WORLD);
-					break;
-					
-				case BOAT_REQ: // (-1, -1)
-					s_request ack = create_request(-1, -1);
-					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, status.sender_id, BOAT_ACK, MPI_COMM_WORLD);
-					break;
-						
-				default:
-					resolved = false;
-					break;
-			}
-			break;
-		case SUIT_CRITICAL:
-			switch(status.MPI_TAG) {
-				case COSTUME_ACK:
-					ack_mutex.lock();
-					ack++;
-					if (ack >= process_list.size()-costumes) {
-						event_mutex.unlock();
-					}
-					ack_mutex.unlock();
-					break;
-					
-				case COSTUME_REQ:
-					if (result->clock < clock) { // send ok
-						s_request ack = create_request(0);
-						MPI_Send(&ack, sizeof(s_request), MPI_BYTE, status.sender_id, COSTUME_ACK, MPI_COMM_WORLD);
-					}
-					else { // cache
-						addToLamportVector(result);
-					}
-					break;
-					
-				case BOAT_REQ:
-					s_request ack = create_request(-1, -1);
-					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, status.sender_id, BOAT_ACK, MPI_COMM_WORLD);
-					break;
-						
-				default:
-					resolved = false;
-					break;
-			}
-			break;
-		case BOAT_CRITICAL:
-			switch(status.MPI_TAG) {
-				case COSTUME_REQ:
-					addToLamportVector(result);
-					break;
-				case BOAT_REQ:
-					if (result->clock > clock) { // dodaj do tablicy
-						addToLamportVector(result);
-					}
-					else {
-						s_request ack = create_request(-1, -1);
-						MPI_Send(&ack, sizeof(s_request), MPI_BYTE, status.sender_id, BOAT_ACK, MPI_COMM_WORLD);
-					}
-					break;
-				case BOAT_ACK:
-					for (auto x : boats_list) {
-						if (x.id == result->value) {
-							x.occupied += result->value2;
-						}
-					}
-					ack_mutex.lock();
-					ack++;
-					if (ack == process_list.size()) {
-						event_mutex.unlock();
-					}
-					ack_mutex.unlock();
-					break;
-					
-				case CRUISE_END:
-					for (auto boat : boats_list) {
-						boat.occupied = 0;
-					}
-					ack = 0;
-					s_request boat_request = create_request(x);
-					boat_request.clock = last_request_clock;
-					broadcastRequest(&boat_request, BOAT_REQ);
-					
-					break;
-				
-				default:
-					resolved = false;
-					break;
-			}
-			break;
-		case ON_BOAT:
-			switch(status.MPI_TAG) {
-				case COSTUME_REQ:
-					addToLamportVector(result);
-					break;
-				case BOAT_REQ: // TODO
-					int a1 = 0; // boat id
-					int a2 = 0; // size requested for a boat
-					s_request ack = create_request(a1, a2); // (boat id, size)
-					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, status.sender_id, BOAT_ACK, MPI_COMM_WORLD);
-					break;
-				case CRUISE:
-					if(result->value == boat_id && result->value2 == rank){
-						signal(SIGALRM, finish_cruise);
-						alarm(rand() % 3 + 2);
-					}
-					break;
-				case CRUISE_END: 
-					event_mutex.unlock();
-					break;
-				default:
-					resolved = false;
-					break;
-			}
-			break;
-		default:
-			resolved = false;
-			break;
-	}
-	return resolved;
-}
-
-
-/** 
- * Function to manage received MPI messages.
- */
-void Tourist::monitorThread() {
-	while(running) {
-		s_request result;
-		MPI_Status status;
-		MPI_Recv(&result, sizeof(s_request), MPI_BYTE, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-		
-		clock_mutex.lock();
-		result.id = request_id;
-		request_id++;
-		clock = std::max(clock, result.clock) + 1;
-		clock_mutex.unlock();
-		
-		handleResponse(&result, status);
-	}
 }
 
 /** >>Done<<
@@ -249,11 +104,213 @@ s_request Tourist::create_request(int value, int value2) {
 	return request;
 }
 
+
+bool Tourist::handleResponse(s_request *result, int status) {
+	bool resolved = true;
+	switch(state) {
+		case PENDING:
+		{
+			switch(status) {
+				case COSTUME_REQ:
+				{
+					s_request ack = create_request(0);
+					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, result->sender_id, COSTUME_ACK, MPI_COMM_WORLD);
+					break;
+				}
+				
+				case BOAT_REQ: // (-1, -1)
+				{
+					s_request ack = create_request(-1, -1);
+					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, result->sender_id, BOAT_ACK, MPI_COMM_WORLD);
+					break;
+				}
+				
+				default:
+				{
+					resolved = false;
+					break;
+				}
+			}
+			break;
+		}
+		
+		case SUIT_CRITICAL:
+		{
+			switch(status) {
+				case COSTUME_ACK:
+				{
+					ack_mutex.lock();
+					ack++;
+					if (ack >= process_list.size()-costumes) {
+						event_mutex.unlock();
+					}
+					ack_mutex.unlock();
+					break;
+				}
+				
+				case COSTUME_REQ:
+				{
+					if (result->clock < clock) { // send ok
+						s_request ack = create_request(0);
+						MPI_Send(&ack, sizeof(s_request), MPI_BYTE, result->sender_id, COSTUME_ACK, MPI_COMM_WORLD);
+					}
+					else { // cache
+						addToLamportVector(result);
+					}
+					break;
+				}
+				
+				case BOAT_REQ:
+				{
+					s_request ack = create_request(-1, -1);
+					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, result->sender_id, BOAT_ACK, MPI_COMM_WORLD);
+					break;
+				}
+				
+				default:
+				{
+					resolved = false;
+					break;
+				}
+			}
+			break;
+		}
+		
+		case BOAT_CRITICAL:
+		{
+			switch(status) {
+				case COSTUME_REQ:
+				{
+					addToLamportVector(result);
+					break;
+				}
+				
+				case BOAT_REQ:
+				{
+					if (result->clock > clock) { // dodaj do tablicy
+						addToLamportVector(result);
+					}
+					else {
+						s_request ack = create_request(-1, -1);
+						MPI_Send(&ack, sizeof(s_request), MPI_BYTE, result->sender_id, BOAT_ACK, MPI_COMM_WORLD);
+					}
+					break;
+				}
+				
+				case BOAT_ACK:
+				{
+					for (auto x : boats_list) {
+						if (x.id == result->value) {
+							x.occupied += result->value2;
+						}
+					}
+					ack_mutex.lock();
+					ack++;
+					if (ack == process_list.size()) {
+						event_mutex.unlock();
+					}
+					ack_mutex.unlock();
+					break;
+				}
+				
+				case CRUISE_END:
+				{
+					for (auto boat : boats_list) {
+						boat.occupied = 0;
+					}
+					ack = 0;
+					s_request boat_request = create_request(capacity);
+					boat_request.clock = last_request_clock;
+					broadcastRequest(&boat_request, BOAT_REQ);
+					break;
+				}
+				
+				default:
+				{
+					resolved = false;
+					break;
+				}
+			}
+			break;
+		}
+		
+		case ON_BOAT:
+		{
+			switch(status) {
+				case COSTUME_REQ:
+				{
+					addToLamportVector(result);
+					break;
+				}
+				
+				case BOAT_REQ:
+				{
+					s_request ack = create_request(boat_id, capacity); // (boat id, size)
+					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, result->sender_id, BOAT_ACK, MPI_COMM_WORLD);
+					break;
+				}
+
+				case CRUISE:
+				{
+					if(result->value == boat_id && result->value2 == rank){
+						// TODO: finish_cruise -> invalid use of non-static member function boid
+						signal(SIGALRM, Tourist::finish_cruise);
+						alarm(rand() % 3 + 2);
+					}
+					break;
+				}
+
+				case CRUISE_END: 
+				{
+					event_mutex.unlock();
+					break;
+				}
+				
+				default:
+				{
+					resolved = false;
+					break;
+				}
+			}
+			break;
+		}
+		
+		default:
+		{
+			resolved = false;
+			break;
+		}
+	}
+	return resolved;
+}
+
+
+/** 
+ * Function to manage received MPI messages.
+ */
+void Tourist::monitorThread() {
+	while(running) {
+		s_request result;
+		MPI_Status status;
+		MPI_Recv(&result, sizeof(s_request), MPI_BYTE, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+		result.type = status.MPI_TAG;
+		
+		clock_mutex.lock();
+		result.id = request_id;
+		request_id++;
+		clock = std::max(clock, result.clock) + 1;
+		clock_mutex.unlock();
+		
+		handleResponse(&result, result.type);
+	}
+}
+
 void Tourist::setState(int value) {
 	if (!lamport_vector.empty()) {
 		std::vector<s_request>::iterator it;
 		for (it = lamport_vector.begin(); it < lamport_vector.end(); it++) {
-			bool x = handleResponse(*it, status);
+			bool x = handleResponse(*it, it->type); 
+			// TODO: change status (status not present in scope)
 			if (x) {
 				removeFromLamportVector(it->id);
 			}
@@ -302,12 +359,12 @@ void Tourist::runPerformThread() {
 			event_mutex.lock();
 			bool found = false;
 			for (auto boat : boats_list) {
-				if (boat.status == 0 && boat.capacity - boat.occupied <= capacity) {
+				if (boat.state == 0 && boat.capacity - boat.occupied <= capacity) {
 					boat_id = boat.id;
 					found = true;
 					break;
 				}
-				else if(boat.status == 0) {
+				else if(boat.state == 0) {
 					if(boat.tourists_list.size() > 0){
 						s_request cruise_request = create_request(boat.id, boat.tourists_list[0]);
 						broadcastRequest(&cruise_request, CRUISE);
