@@ -1,6 +1,8 @@
 
 #include <vector>
 #include <mutex>
+#include <chrono>
+#include <thread>
 
 
 typedef struct {
@@ -70,6 +72,6 @@ class Tourist {
 public:
 	Tourist(int costumes, int boats, int tourists, int max_capacity);
 	void createMonitorThread();
-	boid runPerformThread();
+	void runPerformThread();
 	
 }
