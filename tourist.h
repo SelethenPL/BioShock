@@ -1,4 +1,3 @@
-
 #include <vector>
 #include <mutex>
 #include <chrono>
@@ -55,7 +54,7 @@ class Tourist {
 	void setState(int value);
 	
 	void handleResponse(s_request *request, MPI_Status status);
-	
+	void finishCruise(int sig);
 	void addToLamportVector(s_request *request);
 	void removeFromLamportVector(int sender);
 	

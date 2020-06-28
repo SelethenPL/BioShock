@@ -26,6 +26,7 @@
 #define BOAT_CRITICAL 103
 #define ON_BOAT 104
 
+
 Tourist::Tourist(int costumes, int boats, int tourists, int max_capacity) {
 	
 	size = MPI::COMM_WORLD.Get_size();
@@ -61,6 +62,12 @@ Tourist::Tourist(int costumes, int boats, int tourists, int max_capacity) {
 		MPI_Recv(&boats_list, boats, sizeof(s_boat), MPI_ANY_SOURCE, LAUNCH, MPI_COMM_WORLD, &status);
 	}
 	this.state = PENDING;
+}
+
+void Tourist::finish_cruise(int sig){
+	s_request cruise_end_req = create_request(boat_id);
+	printf("[Rank: %d|Clock: %d]: Boat %d has finished its journey!\n", rank, clock, boat_id);
+	broadcastRequest(&cruise_end_req, CRUISE_END);
 }
 
 void Tourist::createMonitorThread() {
@@ -173,9 +180,14 @@ bool Tourist::handleResponse(s_request *result, MPI_Status status) {
 					s_request ack = create_request(a1, a2); // (boat id, size)
 					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, status.sender_id, BOAT_ACK, MPI_COMM_WORLD);
 					break;
-				case CRUISE_END: // TODO
-					// change statuses of boat
-					// setState(PENDING);
+				case CRUISE:
+					if(result->value == boat_id && result->value2 == rank){
+						signal(SIGALRM, finish_cruise);
+						alarm(rand() % 3 + 2);
+					}
+					break;
+				case CRUISE_END: 
+					// TODO: cleanup code
 					break;
 				default:
 					resolved = false;
@@ -229,7 +241,7 @@ s_request Tourist::create_request(int value) {
 /** >>Done<<
  * Function creates and returns a new request with two values.
  */
-s_request Toutist::create_request(int value, int value2) {
+s_request Tourist::create_request(int value, int value2) {
 	s_request request = create_request(value);
 	request.value2 = value2;
 	
@@ -282,26 +294,34 @@ void Tourist::runPerformThread() {
 		s_request boat_request = create_request(capacity);
 		broadcastRequest(&boat_request, BOAT_REQ);
 		
-		// 6. receive boat ACK
+		// 6. receive boat ACK -> get a boat
 		
 		for (;;) {
 			event_mutex.lock();
 			bool found = false;
 			for (auto boat : boats_list) {
-				if (boat.status = 0 && boat.capacity - boat.occupied <= capacity) {
-					
-					setState(ON_BOAT);
+				if (boat.status == 0 && boat.capacity - boat.occupied <= capacity) {
+					boat_id = boat.id;
+					found = true;
+					break;
 				}
+				else if(boat.status == 0) {
+					if(boat.tourists_list.size() > 0){
+						s_request cruise_request = create_request(boat.id, boat.tourists_list[0]);
+						broadcastRequest(&cruise_request, CRUISE);
+					}
+				}
+			}
+			if(found) {
+				break;
 			}
 		}
 		printf("[Rank: %d|Clock: %d]: %s\n", rank, clock, "Boat received!");
 		setState(ON_BOAT);
-		
-		// 7. iterate via all boats -> get a boat
-		
-		// 8. cruise
-		// 9. release the boat
-		// 10. release costume and start over
+
+		// 7. cruise
+		// 8. release the boat
+		// 9. release costume and start over
 	}
 }
 
