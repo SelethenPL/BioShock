@@ -20,13 +20,17 @@
 	// Releases all the resources
 #define CRUISE_END 6
 
+#define PENDING 100
+#define SUIT_CRITICAL 101
+#define BOAT_CRITICAL 102
+#define ON_BOAT 103
 
 Tourist::Tourist(int costumes, int boats, int tourists, int max_capacity) {
 	
 	size = MPI::COMM_WORLD.Get_size();
 	rank = MPI::COMM_WORLD.Get_rank();
 	
-	// this.state = 0; // "PENDING"
+	// this.state = PENDING;
 	// this.process_list = null; // ???
 	// this.costumes = costumes;
 	// this.have_costume = 0;
@@ -55,39 +59,67 @@ void Tourist::monitorThread() {
 		clock = std::max(clock, result.clock) + 1;
 		clock_mutex.unlock();
 		
-		switch(status.MPI_TAG) {
-			case LAUNCH:
-			
-				break;
-				
-			case COSTUME_REQ:
-				
-				break;
-				
-			case COSTUME_ACK:
-				
-				break;
-				
-			case BOAT_REQ:
-			
-				break;
-			
-			case BOAT_ACK:
-			
-				break;
-			
-			case CRUISE:
-			
-				break;
-			
-			case CRUISE_END:
-			
-				break;
-			
-			default:
-				break;
-			
-			
+		// TODO: Add interactions
+		if (state == PENDING) {
+			switch(status.MPI_TAG) {
+				case COSTUME_REQ:
+					// send costume_ack
+					break;
+					
+				case BOAT_REQ:
+					// send boat_ack (-1, -1)
+					break;
+					
+				default:
+					break;
+			}		
+		}
+		if (state == SUIT_CRITICAL) {
+			switch(status.MPI_TAG) {
+				case COSTUME_ACK:
+					// dłuższy opis
+					break;
+				case COSTUME_REQ:
+					// send costume_ack (priorytety)
+					break;
+				case BOAT_REQ:
+					// send boat_act (-1, -1)
+					break;
+				default:
+					break;
+			}
+		}
+		if (state == BOAT_CRITICAL) {
+			switch(status.MPI_TAG) {
+				case COSTUME_ACK:
+					// stop request til costume is released
+					break;
+				case COSTUME_REQ:
+					// stop request (priority of time)
+					// else add to lamport_vector
+					break;
+				case BOAT_REQ:
+					// update array of boat state
+					break;
+				default:
+					break;
+			}
+		}
+		if (state == ON_BOAT) {
+			switch(status.MPI_TAG) {
+				case COSTUME_REQ:
+					// stop request til costume is released
+					break;
+				case BOAT_REQ:
+					// send boat_ack (boat id, size)
+					break;
+				case CRUISE_END:
+					// change statuses of boat
+					// state = PENDING;
+					break;
+				default:
+					break;
+			}
 		}
 	}
 }
@@ -112,17 +144,50 @@ s_request Tourist::create_request(int value) {
 void Tourist::runPerformThread() {
 	while(running) {
 		// perform all tasks
-		// 1. wait to spawn
+		// 1. initialization
 		
-		// 2. Require an costume
+		// 2. wait to spawn
+		// sleep thread for random time
+		// state = SUIT_CRITICAL;
 		
-		s_request costume_request = create_request(x);
-		// wait_for_ack = request.clock;
+		// 3. sending costume request
 		
+		printf("[Rank: %d|Clock: %d]: %s\n", rank, clock, "Request for costume");
+		ack = 0;
+		s_request costume_request = create_request(0);
+		broadcastRequest(&costume_request, COSTUME_REQ);
 		
-		// 3. require an boat
-		// 4. cruise (?)
-		// 5. end cruise and release resources
+		// 4. receive costume ACK for every proc -> get a costume
+		
+		while(true) {
+			// algorithm for costume request
+			// mutex.lock();
+			
+			// TODO: global variable ACK;
+			// check for costumes variable
+			if (ack > 10) {
+				printf("[Rank: %d|Clock: %d]: %s\n", rank, clock, "Costume received!");
+				// state = BOAT_CRITICAL;
+				break;
+			};
+			
+			// mutex.unlock();
+		}
+		
+		// 5. sending boat request
+		int x = 5; // place needed on boat
+		
+		printf("[Rank: %d|Clock: %d]: %s\n", rank, clock, "Request for boat");
+		s_request boat_request = create_request(x);
+		broadcastRequest(&boat_request, BOAT_REQ);
+		
+		// 6. receive boat ACK
+		
+		// 7. iterate via all boats -> get a boat
+		
+		// 8. cruise
+		// 9. release the boat
+		// 10. release costume and start over
 	}
 }
 
@@ -139,10 +204,10 @@ void Tourist::broadcastRequest(s_request *request, int request_type) {
  * Adding request to local list of events.
  */
 void Tourist::addToLamportVector(s_lamport_vector *lamport, s_request *request) {
-	vector -> edit_mutex.lock();
+	lamport -> edit_mutex.lock();
 	std::vector<s_request>::iterator it;
 	
-	for (it = lamport -> vector.begin(); it < lamport -> vector.end(); it++) {
+	for (it = lamport -> lamport_vector.begin(); it < lamport -> lamport_vector.end(); it++) {
 		if (it->clock > request->clock) {
 			break;
 		}
@@ -151,23 +216,23 @@ void Tourist::addToLamportVector(s_lamport_vector *lamport, s_request *request) 
 			break;
 		}
 	}
-	vector -> vector.insert(it, *request);
-	vector -> edit_mutex.unlock();
+	lamport -> lamport_vector.insert(it, *request);
+	lamport -> edit_mutex.unlock();
 }
 
 /** >>Done<< (as above)
  * Removing first spotted request in local list of events.
  */
 void Tourist::removeFromLamportVector(s_lamport_vector *lamport, int sender) {
-	vector -> edit_mutex.lock();
+	lamport -> edit_mutex.lock();
 	std::vector<s_request>::iterator it;
 	
-	for (it = lamport -> vector.begin(); it < lamport -> vector.end(); it++) {
+	for (it = lamport -> lamport_vector.begin(); it < lamport -> lamport_vector.end(); it++) {
 		if (it->sender_id == sender) {
-			vector -> vector.erase(it);
+			lamport -> lamport_vector.erase(it);
 			break;
 		}
 	}
-	vector -> edit_mutex.unlock();
+	lamport -> edit_mutex.unlock();
 }
 

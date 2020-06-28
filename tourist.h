@@ -10,7 +10,7 @@ typedef struct {
 	std::vector<int> tourists_list; // 4) lista pasażerów
 } s_boat;
 
-typedef request {
+typedef struct {
 	int value; // 1) typ wiadomości
 	int value2; // 2) zawartość wiadomości
 	int sender_id; // 3) numer id obiektu wysyłającego
@@ -50,12 +50,16 @@ class Tourist {
 	// 8) Stan zegara Lamporta
 	int clock;
 	std::mutex clock_mutex;
+	int ack;
 	
 	bool running;
 	
 	void monitorThread();
 	void broadcastRequest(s_request *request, int request_type);
 	s_request create_request(int value);
+	
+	void addToLamportVector();
+	void removeFromLamportVector();
 	
 public:
 	Tourist(int costumes, int boats, int tourists, int max_capacity);
