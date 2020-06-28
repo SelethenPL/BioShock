@@ -146,6 +146,17 @@ bool Tourist::handleResponse(s_request *result, MPI_Status status) {
 					}
 					ack_mutex.unlock();
 					break;
+					
+				case CRUISE_END:
+					for (auto boat : boats_list) {
+						boat.occupied = 0;
+					}
+					ack = 0;
+					s_request boat_request = create_request(x);
+					broadcastRequest(&boat_request, BOAT_REQ);
+					
+					break;
+				
 				default:
 					resolved = false;
 					break;
@@ -208,9 +219,8 @@ s_request Tourist::create_request(int value) {
 	
 	clock_mutex.lock();
 	
-	request.id = request_id;
-	request_id++;
-	clock++;
+	request.id = request_id++;
+	request.clock = clock++;
 	
 	clock_mutex.unlock();
 	
@@ -265,26 +275,26 @@ void Tourist::runPerformThread() {
 		
 		// 5. sending boat request
 		
-		int x = (rand()%5) + 2; // place needed on boat
+		capacity = (rand()%5) + 2; // place needed on boat
 		
 		printf("[Rank: %d|Clock: %d]: %s\n", rank, clock, "Request for boat");
 		ack = 0;
-		s_request boat_request = create_request(x);
+		s_request boat_request = create_request(capacity);
 		broadcastRequest(&boat_request, BOAT_REQ);
 		
 		// 6. receive boat ACK
 		
 		for (;;) {
 			event_mutex.lock();
+			bool found = false;
 			for (auto boat : boats_list) {
-				if (boat.status = 0 && boat.capacity - boat.occupied <= x) {
+				if (boat.status = 0 && boat.capacity - boat.occupied <= capacity) {
 					
 					setState(ON_BOAT);
 				}
 			}
 		}
 		printf("[Rank: %d|Clock: %d]: %s\n", rank, clock, "Boat received!");
-		printf("Left %d space on boat id: %d.", 0, 0); 
 		setState(ON_BOAT);
 		
 		// 7. iterate via all boats -> get a boat

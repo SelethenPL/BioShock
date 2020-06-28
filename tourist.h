@@ -40,6 +40,11 @@ class Tourist {
 	std::mutex lamport_mutex;
 	int request_id;
 	
+	// Wartości klienta
+	int capacity;
+	int boat_id;
+	int last_request_clock;
+	
 	bool running;
 	
 	void monitorThread();
