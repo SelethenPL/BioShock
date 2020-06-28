@@ -51,15 +51,21 @@ class Tourist {
 	int clock;
 	std::mutex clock_mutex;
 	int ack;
+	std::mutex ack_mutex;
+	
+	// *) Lista zegarów lamporta
+	s_lamport_vector costume_queue;
+	s_lamport_vector boat_queue;
 	
 	bool running;
 	
 	void monitorThread();
 	void broadcastRequest(s_request *request, int request_type);
 	s_request create_request(int value);
+	s_request create_request(int value, int value2);
 	
-	void addToLamportVector();
-	void removeFromLamportVector();
+	void addToLamportVector(s_lamport_vector *lamport, s_request *request);
+	void removeFromLamportVector(s_lamport_vector *lamport, int sender);
 	
 public:
 	Tourist(int costumes, int boats, int tourists, int max_capacity);

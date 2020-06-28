@@ -1,5 +1,6 @@
 // running as boolean in class?
 #include <mpi.h>
+#include <chrono>
 #include <thread>
 #include "tourist.h"
 
@@ -63,11 +64,15 @@ void Tourist::monitorThread() {
 		if (state == PENDING) {
 			switch(status.MPI_TAG) {
 				case COSTUME_REQ:
-					// send costume_ack
+					addToLamportVector(&costume_queue, &result);
+					s_request ack = create_request(0);
+					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, status.sender_id, COSTUME_ACK, MPI_COMM_WORLD);
 					break;
 					
-				case BOAT_REQ:
-					// send boat_ack (-1, -1)
+				case BOAT_REQ: // (-1, -1)
+					addToLamportVector(&boat_queue, &result);
+					s_request ack = create_request(-1);
+					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, status.sender_id, BOAT_ACK, MPI_COMM_WORLD);
 					break;
 					
 				default:
@@ -78,13 +83,22 @@ void Tourist::monitorThread() {
 			switch(status.MPI_TAG) {
 				case COSTUME_ACK:
 					// dłuższy opis
+					// ?????
+					ack_mutex.lock();
+					ack++;
+					ack_mutex.unlock();
 					break;
+					
 				case COSTUME_REQ:
 					// send costume_ack (priorytety)
 					break;
-				case BOAT_REQ:
-					// send boat_act (-1, -1)
+					
+				case BOAT_REQ: // (-1, -1)
+					addToLamportVector(&boat_queue, &result);
+					s_request ack = create_request(-1);
+					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, status.sender_id, BOAT_ACK, MPI_COMM_WORLD);
 					break;
+					
 				default:
 					break;
 			}
@@ -93,6 +107,7 @@ void Tourist::monitorThread() {
 			switch(status.MPI_TAG) {
 				case COSTUME_ACK:
 					// stop request til costume is released
+					// ????
 					break;
 				case COSTUME_REQ:
 					// stop request (priority of time)
@@ -109,9 +124,14 @@ void Tourist::monitorThread() {
 			switch(status.MPI_TAG) {
 				case COSTUME_REQ:
 					// stop request til costume is released
+					// ????
 					break;
 				case BOAT_REQ:
-					// send boat_ack (boat id, size)
+					addToLamportVector(&boat_queue, &result);
+					int a1 = 0; // boat id
+					int a2 = 0; // size requested for a boat
+					s_request ack = create_request(a1, a2); // (boat id, size)
+					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, status.sender_id, BOAT_ACK, MPI_COMM_WORLD);
 					break;
 				case CRUISE_END:
 					// change statuses of boat
@@ -126,7 +146,7 @@ void Tourist::monitorThread() {
 
 
 /** >>Done<<
- * Function creates and returns a new request.
+ * Function creates and returns a new request with one value.
  */
 s_request Tourist::create_request(int value) {
 	s_request request;
@@ -139,6 +159,15 @@ s_request Tourist::create_request(int value) {
 	
 	return request;
 }
+/** >>Done<<
+ * Function creates and returns a new request with two values.
+ */
+s_request Toutist::create_request(int value, int value2) {
+	s_request request = create_request(value);
+	request.value2 = value2;
+	
+	return request;
+}
 
 
 void Tourist::runPerformThread() {
@@ -147,8 +176,9 @@ void Tourist::runPerformThread() {
 		// 1. initialization
 		
 		// 2. wait to spawn
-		// sleep thread for random time
-		// state = SUIT_CRITICAL;
+		
+		std::this_thread::sleep_for(std::chrono::milliseconds((rand()%5000) + 2000));
+		state = SUIT_CRITICAL;
 		
 		// 3. sending costume request
 		
@@ -161,27 +191,43 @@ void Tourist::runPerformThread() {
 		
 		while(true) {
 			// algorithm for costume request
-			// mutex.lock();
+			ack_mutex.lock();
 			
-			// TODO: global variable ACK;
 			// check for costumes variable
 			if (ack > 10) {
 				printf("[Rank: %d|Clock: %d]: %s\n", rank, clock, "Costume received!");
-				// state = BOAT_CRITICAL;
+				state = BOAT_CRITICAL;
+				have_costume = 1;
 				break;
 			};
 			
-			// mutex.unlock();
+			ack_mutex.unlock();
 		}
 		
 		// 5. sending boat request
-		int x = 5; // place needed on boat
+		
+		int x = (rand()%5000) + 2000; // place needed on boat
 		
 		printf("[Rank: %d|Clock: %d]: %s\n", rank, clock, "Request for boat");
+		ack = 0;
 		s_request boat_request = create_request(x);
 		broadcastRequest(&boat_request, BOAT_REQ);
 		
 		// 6. receive boat ACK
+		
+		while(true) {
+			ack_mutex.lock();
+			
+			// TODO: update with boats
+			if (ack > 10) {
+				printf("[Rank: %d|Clock: %d]: %s\n", rank, clock, "Boat received!");
+				printf("Left %d space on boat id: %d.", 0, 0); 
+				state = ON_BOAT;
+				break;
+			}
+			
+			ack_mutex.unlock();
+		}
 		
 		// 7. iterate via all boats -> get a boat
 		
