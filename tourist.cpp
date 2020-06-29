@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <thread>
 #include <cstdio>
+#include <ctime>
 #include <csignal>
 #include <iostream>
 #include <unistd.h>		
@@ -37,8 +38,9 @@ Tourist::Tourist(int costumes, int boats, int tourists, int max_capacity) {
 	size = MPI::COMM_WORLD.Get_size();
 	rank = MPI::COMM_WORLD.Get_rank();
 	
+	srand(time(NULL) * rank);
 	this->state = INIT;
-	for (int i = 0; i < size; i++) {
+	for (int i = 0; i < tourists; i++) {
 		this->process_list.push_back(i);
 	}
 	this->costumes = costumes;
@@ -50,21 +52,24 @@ Tourist::Tourist(int costumes, int boats, int tourists, int max_capacity) {
 	this->request_id = 0;
 	
 	// proces madka
-	if (rank == 0) {
+	//if (rank == 0) {
 		
 		for (int i = 0; i < boats; i++) {
 			s_boat boat;
 			boat.id = i;
-			boat.capacity = rand()%10+10; // 10-20
+			boat.capacity = 10 + 2 * i; //rand()%10+10; // 10-20
 			boat.state = 0;
 			boats_list.push_back(boat);
 		}
 		
-		for (int i = 1; i < size; i++)
+		/*for (int i = 1; i < size; i++)
 			MPI_Send(&boats_list, boats, MPI_UNSIGNED_LONG, i, LAUNCH, MPI_COMM_WORLD);
 	} else {
 		MPI_Recv(&boats_list, boats, MPI_UNSIGNED_LONG, MPI_ANY_SOURCE, LAUNCH, MPI_COMM_WORLD, 0);
-	}
+		for (auto x: boats_list) {
+			printf("[rank: %d, %d %d]", rank, x.id, x.capacity);
+		}
+	}*/
 	this->state = PENDING;
 	printf("[Rank: %d|Clock: %d]: %s\n", rank, clock, "Created a tourist!");
 }
@@ -110,6 +115,7 @@ bool Tourist::handleResponse(s_request *result, int status) {
 				case COSTUME_REQ:
 				{
 					s_request ack = create_request(0);
+					printf("===PENDING>>>[%d|%d] COSTUME_ACK to [%d|%d]\n", rank, clock, result->sender_id, result->clock);
 					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, result->sender_id, COSTUME_ACK, MPI_COMM_WORLD);
 					break;
 				}
@@ -117,6 +123,7 @@ bool Tourist::handleResponse(s_request *result, int status) {
 				case BOAT_REQ: // (-1, -1)
 				{
 					s_request ack = create_request(-1, -1);
+					printf("===PENDING>>>[%d|%d] BOAT_ACK to [%d|%d]\n", rank, clock, result->sender_id, result->clock);
 					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, result->sender_id, BOAT_ACK, MPI_COMM_WORLD);
 					break;
 				}
@@ -136,8 +143,11 @@ bool Tourist::handleResponse(s_request *result, int status) {
 				case COSTUME_ACK:
 				{
 					ack_mutex.lock();
-					ack++;
+					if (result->value == 0)
+						ack++;
+					printf("[%d|%d] COSTUME_ACK from [%d|%d]<<<SUIT===(ack=%d)\n", rank, clock, result->sender_id, result->clock, ack);
 					if (ack >= process_list.size()-costumes) {
+						setState(BOAT_CRITICAL);
 						event_mutex.unlock();
 					}
 					ack_mutex.unlock();
@@ -146,8 +156,9 @@ bool Tourist::handleResponse(s_request *result, int status) {
 				
 				case COSTUME_REQ:
 				{
-					if (result->clock < clock) { // send ok
+					if (result->clock < clock || (result->clock == clock && rank > result->id)) { // send ok
 						s_request ack = create_request(0);
+						printf("===SUIT>>>[%d|%d] COSTUME_ACK to [%d|%d]\n", rank, clock, result->sender_id, result->clock);
 						MPI_Send(&ack, sizeof(s_request), MPI_BYTE, result->sender_id, COSTUME_ACK, MPI_COMM_WORLD);
 					}
 					else { // cache
@@ -159,6 +170,7 @@ bool Tourist::handleResponse(s_request *result, int status) {
 				case BOAT_REQ:
 				{
 					s_request ack = create_request(-1, -1);
+					printf("===SUIT>>>[%d|%d] BOAT_ACK to [%d|%d]\n", rank, clock, result->sender_id, result->clock);
 					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, result->sender_id, BOAT_ACK, MPI_COMM_WORLD);
 					break;
 				}
@@ -177,6 +189,7 @@ bool Tourist::handleResponse(s_request *result, int status) {
 			switch(status) {
 				case COSTUME_REQ:
 				{
+					printf("Add to lamport\n");
 					addToLamportVector(result);
 					break;
 				}
@@ -184,10 +197,12 @@ bool Tourist::handleResponse(s_request *result, int status) {
 				case BOAT_REQ:
 				{
 					if (result->clock > clock) { // dodaj do tablicy
+						printf("Add to lamport\n");
 						addToLamportVector(result);
 					}
 					else {
 						s_request ack = create_request(-1, -1);
+						printf("===BOAT>>>[%d|%d] BOAT_ACK to [%d|%d]\n", rank, clock, result->sender_id, result->clock);
 						MPI_Send(&ack, sizeof(s_request), MPI_BYTE, result->sender_id, BOAT_ACK, MPI_COMM_WORLD);
 					}
 					break;
@@ -195,6 +210,7 @@ bool Tourist::handleResponse(s_request *result, int status) {
 				
 				case BOAT_ACK:
 				{
+					printf("[%d|%d] BOAT_ACK from [%d|%d]<<<BOAT===(ack=%d)\n", rank, clock, result->sender_id, result->clock, ack);
 					for (auto x : boats_list) {
 						if (x.id == result->value) {
 							x.occupied += result->value2;
@@ -293,27 +309,28 @@ void Tourist::monitorThread() {
 		MPI_Recv(&result, sizeof(s_request), MPI_BYTE, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
 		result.type = status.MPI_TAG;
 		
+		handleResponse(&result, result.type);
+
 		clock_mutex.lock();
 		result.id = request_id;
 		request_id++;
 		clock = std::max(clock, result.clock) + 1;
 		clock_mutex.unlock();
-		
-		handleResponse(&result, result.type);
 	}
 }
 
 void Tourist::setState(int value) {
 	if (!lamport_vector.empty()) {
-		std::vector<s_request>::iterator it;
-		for (it = lamport_vector.begin(); it < lamport_vector.end(); it++) {
-			bool x = handleResponse(&(*it), it->type); 
-			// TODO: change status (status not present in scope)
-			if (x) {
-				removeFromLamportVector(it->id);
+			std::vector<s_request>::iterator it;
+			for (it = lamport_vector.begin(); it < lamport_vector.end(); it++) {
+				bool x = handleResponse(&(*it), it->type); 
+				// TODO: change status (status not present in scope)
+				if (x) {
+					removeFromLamportVector(it->id);
+				}
 			}
 		}
-	}
+		
 	state = value;
 }
 
@@ -324,7 +341,7 @@ void Tourist::runPerformThread() {
 		
 		// 2. wait to spawn
 		
-		std::this_thread::sleep_for(std::chrono::milliseconds((rand()%5000) + 2000));
+		std::this_thread::sleep_for(std::chrono::milliseconds((rand()%10000) + 2000));
 		setState(SUIT_CRITICAL);
 		
 		// 3. sending costume request
@@ -403,8 +420,10 @@ void Tourist::runPerformThread() {
  */
 void Tourist::broadcastRequest(s_request *request, int request_type) {
 	for (int i = 0; i < size; i++)
-		if (i != rank)
+		if (i != rank) {
 			MPI_Send(request, sizeof(s_request), MPI_BYTE, i, request_type, MPI_COMM_WORLD);
+			//printf("Broadcast %d to %d\n", rank, i);
+		}
 }
 
 /** >>Done<< (in theory should be alright)
