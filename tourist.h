@@ -44,6 +44,7 @@ class Tourist {
 	int boat_id;
 	int last_request_clock;
 	
+	bool is_captain;
 	bool running;
 	
 	void monitorThread();

@@ -1,5 +1,6 @@
 #include <mpi.h>
 #include <chrono>
+#include <unistd.h>
 #include <thread>
 #include "tourist.h"
 
@@ -62,12 +63,6 @@ Tourist::Tourist(int costumes, int boats, int tourists, int max_capacity) {
 		MPI_Recv(&boats_list, boats, sizeof(s_boat), MPI_ANY_SOURCE, LAUNCH, MPI_COMM_WORLD, &status);
 	}
 	this.state = PENDING;
-}
-
-void Tourist::finish_cruise(int sig){
-	s_request cruise_end_req = create_request(boat_id);
-	printf("[Rank: %d|Clock: %d]: Boat %d has finished its journey!\n", rank, clock, boat_id);
-	broadcastRequest(&cruise_end_req, CRUISE_END);
 }
 
 void Tourist::createMonitorThread() {
@@ -182,13 +177,16 @@ bool Tourist::handleResponse(s_request *result, MPI_Status status) {
 					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, status.sender_id, BOAT_ACK, MPI_COMM_WORLD);
 					break;
 				case CRUISE:
+					is_captain = false;
 					if(result->value == boat_id && result->value2 == rank){
-						signal(SIGALRM, finish_cruise);
-						alarm(rand() % 3 + 2);
+						is_captain = true;
 					}
-					break;
-				case CRUISE_END: 
 					event_mutex.unlock();
+					break;
+				case CRUISE_END:
+					if(result->value == boat_id){
+						event_mutex.unlock();
+					}
 					break;
 				default:
 					resolved = false;
@@ -321,13 +319,24 @@ void Tourist::runPerformThread() {
 		printf("[Rank: %d|Clock: %d]: %s\n", rank, clock, "Boat received!");
 		setState(ON_BOAT);
 
-		// 7. cruise
+		// 7. wait for cruise launch
 		event_mutex.lock();
 
-		// 8. release the boat
+		// 8. end the cruise
+		if(is_captain){
+			int sleep_time = rand() % 3 + 3;
+			sleep(sleep_time);
+			s_request cruise_end_req = create_request(boat_id);
+			broadcastRequest(&cruise_end_req, CRUISE_END)
+		}
+		else {
+			event_mutex.lock();
+		}
+
+		// 9. release the boat
 		boat_id = -1;
 
-		// 9. release costume and start over
+		// 10. release costume and start over
 		have_costume = 0;
 	}
 }
