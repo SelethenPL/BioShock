@@ -66,6 +66,7 @@ Tourist::Tourist(int costumes, int boats, int tourists, int max_capacity) {
 		MPI_Recv(&boats_list, boats, MPI_UNSIGNED_LONG, MPI_ANY_SOURCE, LAUNCH, MPI_COMM_WORLD, 0);
 	}
 	this->state = PENDING;
+	printf("[Rank: %d|Clock: %d]: %s\n", rank, clock, "Created a tourist!");
 }
 
 void Tourist::createMonitorThread() {
@@ -246,35 +247,23 @@ bool Tourist::handleResponse(s_request *result, int status) {
 				}
 
 				case CRUISE:
-<<<<<<< HEAD
+				{
 					is_captain = false;
 					if(result->value == boat_id && result->value2 == rank){
 						is_captain = true;
 					}
 					event_mutex.unlock();
 					break;
+				}
+				
 				case CRUISE_END:
+				{
 					if(result->value == boat_id){
 						event_mutex.unlock();
 					}
 					break;
-=======
-				{
-					if(result->value == boat_id && result->value2 == rank){
-						// TODO: finish_cruise -> invalid use of non-static member function boid
-						signal(SIGALRM, Tourist::finish_cruise);
-						alarm(rand() % 3 + 2);
-					}
-					break;
-				}
-
-				case CRUISE_END: 
-				{
-					event_mutex.unlock();
-					break;
 				}
 				
->>>>>>> b569309fb26b6d6d5d855776e7cfa987c4a74832
 				default:
 				{
 					resolved = false;
@@ -318,7 +307,7 @@ void Tourist::setState(int value) {
 	if (!lamport_vector.empty()) {
 		std::vector<s_request>::iterator it;
 		for (it = lamport_vector.begin(); it < lamport_vector.end(); it++) {
-			bool x = handleResponse(*it, it->type); 
+			bool x = handleResponse(&(*it), it->type); 
 			// TODO: change status (status not present in scope)
 			if (x) {
 				removeFromLamportVector(it->id);
@@ -373,14 +362,14 @@ void Tourist::runPerformThread() {
 					found = true;
 					break;
 				}
-				else if(boat.state == 0) {
+				else if (boat.state == 0) {
 					if(boat.tourists_list.size() > 0){
 						s_request cruise_request = create_request(boat.id, boat.tourists_list[0]);
 						broadcastRequest(&cruise_request, CRUISE);
 					}
 				}
 			}
-			if(found) {
+			if (found) {
 				break;
 			}
 		}
@@ -391,11 +380,11 @@ void Tourist::runPerformThread() {
 		event_mutex.lock();
 
 		// 8. end the cruise
-		if(is_captain){
+		if (is_captain) {
 			int sleep_time = rand() % 3 + 3;
 			sleep(sleep_time);
 			s_request cruise_end_req = create_request(boat_id);
-			broadcastRequest(&cruise_end_req, CRUISE_END)
+			broadcastRequest(&cruise_end_req, CRUISE_END);
 		}
 		else {
 			event_mutex.lock();

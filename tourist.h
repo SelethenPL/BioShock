@@ -1,3 +1,7 @@
+#ifndef PLEASEWORK_TOURIST_H
+#define PLEASEWORK_TOURIST_H
+
+
 #include <vector>
 #include <mutex>
 #include <chrono>
@@ -81,3 +85,5 @@ public:
 	void createMonitorThread();
 	void runPerformThread();
 };
+
+#endif PLEASEWORK_TOURIST_H
