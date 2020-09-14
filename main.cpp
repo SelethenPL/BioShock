@@ -1,10 +1,10 @@
 #include <mpi.h>
 #include "tourist.h"
 
-#define COSTUMES 1
-#define BOATS 1
-#define TOURISTS 1
-#define MAX_CAPACITY 5
+#define COSTUMES 4
+#define BOATS 2
+#define TOURISTS 4
+#define MAX_CAPACITY 15
 
 int main(int argc, char **argv) {
 	printf("0. Zero\n");

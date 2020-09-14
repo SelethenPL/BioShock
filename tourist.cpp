@@ -95,6 +95,7 @@ s_request Tourist::create_request(int value) {
 	
 	return request;
 }
+
 /** >>Done<<
  * Function creates and returns a new request with two values.
  */
@@ -115,7 +116,7 @@ bool Tourist::handleResponse(s_request *result, int status) {
 				case COSTUME_REQ:
 				{
 					s_request ack = create_request(0);
-					printf("===PENDING>>>[%d|%d] COSTUME_ACK to [%d|%d]\n", rank, clock, result->sender_id, result->clock);
+					log("Sending Costume ACK to " + std::to_string(result->sender_id));
 					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, result->sender_id, COSTUME_ACK, MPI_COMM_WORLD);
 					break;
 				}
@@ -123,7 +124,7 @@ bool Tourist::handleResponse(s_request *result, int status) {
 				case BOAT_REQ: // (-1, -1)
 				{
 					s_request ack = create_request(-1, -1);
-					printf("===PENDING>>>[%d|%d] BOAT_ACK to [%d|%d]\n", rank, clock, result->sender_id, result->clock);
+					log("Sending Boat ACK to " + std::to_string(result->sender_id));
 					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, result->sender_id, BOAT_ACK, MPI_COMM_WORLD);
 					break;
 				}
@@ -145,7 +146,7 @@ bool Tourist::handleResponse(s_request *result, int status) {
 					ack_mutex.lock();
 					if (result->value == 0)
 						ack++;
-					printf("[%d|%d] COSTUME_ACK from [%d|%d]<<<SUIT===(ack=%d)\n", rank, clock, result->sender_id, result->clock, ack);
+					log("Acquired Costume ACK from " + std::to_string(result->sender_id));
 					if (ack >= process_list.size()-costumes) {
 						setState(BOAT_CRITICAL);
 						event_mutex.unlock();
@@ -158,7 +159,7 @@ bool Tourist::handleResponse(s_request *result, int status) {
 				{
 					if (result->clock < clock || (result->clock == clock && rank > result->id)) { // send ok
 						s_request ack = create_request(0);
-						printf("===SUIT>>>[%d|%d] COSTUME_ACK to [%d|%d]\n", rank, clock, result->sender_id, result->clock);
+						log("Sending Costume ACK to " + std::to_string(result->sender_id));
 						MPI_Send(&ack, sizeof(s_request), MPI_BYTE, result->sender_id, COSTUME_ACK, MPI_COMM_WORLD);
 					}
 					else { // cache
@@ -189,7 +190,7 @@ bool Tourist::handleResponse(s_request *result, int status) {
 			switch(status) {
 				case COSTUME_REQ:
 				{
-					printf("Add to lamport\n");
+					log("Costume request from " + std::to_string(result->sender_id) + " suspended");
 					addToLamportVector(result);
 					break;
 				}
@@ -197,12 +198,12 @@ bool Tourist::handleResponse(s_request *result, int status) {
 				case BOAT_REQ:
 				{
 					if (result->clock > clock) { // dodaj do tablicy
-						printf("Add to lamport\n");
+						log("Boat request from " + std::to_string(result->sender_id) + " suspended");
 						addToLamportVector(result);
 					}
 					else {
 						s_request ack = create_request(-1, -1);
-						printf("===BOAT>>>[%d|%d] BOAT_ACK to [%d|%d]\n", rank, clock, result->sender_id, result->clock);
+						log("Sending Boat ACK to " + std::to_string(result->sender_id));
 						MPI_Send(&ack, sizeof(s_request), MPI_BYTE, result->sender_id, BOAT_ACK, MPI_COMM_WORLD);
 					}
 					break;
@@ -210,7 +211,7 @@ bool Tourist::handleResponse(s_request *result, int status) {
 				
 				case BOAT_ACK:
 				{
-					printf("[%d|%d] BOAT_ACK from [%d|%d]<<<BOAT===(ack=%d)\n", rank, clock, result->sender_id, result->clock, ack);
+					log("Received Boat ACK from " + std::to_string(result->sender_id));
 					for (auto x : boats_list) {
 						if (x.id == result->value) {
 							x.occupied += result->value2;
@@ -346,7 +347,7 @@ void Tourist::runPerformThread() {
 		
 		// 3. sending costume request
 		
-		printf("[Rank: %d|Clock: %d]: %s\n", rank, clock, "Request for costume");
+		log("Requesting costume...");
 		ack = 0;
 		s_request costume_request = create_request(0);
 		broadcastRequest(&costume_request, COSTUME_REQ);
@@ -354,7 +355,7 @@ void Tourist::runPerformThread() {
 		// 4. receive costume ACK for every proc -> get a costume
 		
 		event_mutex.lock();
-		printf("[Rank: %d|Clock: %d]: %s\n", rank, clock, "Costume received!");
+		log("Received a costume!");
 		setState(BOAT_CRITICAL);
 		have_costume = 1;
 		
@@ -362,14 +363,13 @@ void Tourist::runPerformThread() {
 		
 		capacity = (rand()%5) + 2; // place needed on boat
 		
-		printf("[Rank: %d|Clock: %d]: %s\n", rank, clock, "Request for boat");
+		log("Requesting a boat");
 		ack = 0;
 		s_request boat_request = create_request(capacity);
 		last_request_clock = boat_request.clock;
 		broadcastRequest(&boat_request, BOAT_REQ);
 		
 		// 6. receive boat ACK -> get a boat
-		
 		for (;;) {
 			event_mutex.lock();
 			bool found = false;
@@ -390,7 +390,7 @@ void Tourist::runPerformThread() {
 				break;
 			}
 		}
-		printf("[Rank: %d|Clock: %d]: %s\n", rank, clock, "Boat received!");
+		log("Boat received!");
 		setState(ON_BOAT);
 
 		// 7. wait for cruise launch
@@ -462,3 +462,6 @@ void Tourist::removeFromLamportVector(int id) {
 	lamport_mutex.unlock();
 }
 
+void Tourist::log(std::string message){
+	printf("[ID: %d|Clock: %d]: %s\n", rank, clock, message.c_str());
+}

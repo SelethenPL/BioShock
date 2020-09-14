@@ -79,6 +79,7 @@ class Tourist {
 	void addToLamportVector(s_request *request);
 	void removeFromLamportVector(int sender);
 	void finish_cruise(int sig);
+	void log(std::string msg);
 	
 public:
 	Tourist(int costumes, int boats, int tourists, int max_capacity);
@@ -86,4 +87,4 @@ public:
 	void runPerformThread();
 };
 
-#endif PLEASEWORK_TOURIST_H
+#endif
