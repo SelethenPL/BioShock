@@ -3,7 +3,7 @@
 
 #define COSTUMES 4
 #define BOATS 2
-#define TOURISTS 4
+#define TOURISTS 2
 #define MAX_CAPACITY 15
 
 int main(int argc, char **argv) {

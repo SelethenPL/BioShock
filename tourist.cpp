@@ -71,7 +71,7 @@ Tourist::Tourist(int costumes, int boats, int tourists, int max_capacity) {
 		}
 	}*/
 	this->state = PENDING;
-	printf("[Rank: %d|Clock: %d]: %s\n", rank, clock, "Created a tourist!");
+	log("Created a tourist!");
 }
 
 void Tourist::createMonitorThread() {
@@ -147,7 +147,7 @@ bool Tourist::handleResponse(s_request *result, int status) {
 					if (result->value == 0)
 						ack++;
 					log("Acquired Costume ACK from " + std::to_string(result->sender_id));
-					if (ack >= process_list.size()-costumes) {
+					if (ack + costumes >= process_list.size()) {
 						setState(BOAT_CRITICAL);
 						event_mutex.unlock();
 					}
@@ -171,7 +171,7 @@ bool Tourist::handleResponse(s_request *result, int status) {
 				case BOAT_REQ:
 				{
 					s_request ack = create_request(-1, -1);
-					printf("===SUIT>>>[%d|%d] BOAT_ACK to [%d|%d]\n", rank, clock, result->sender_id, result->clock);
+					log("Sending Boat ACK to " + std::to_string(result->sender_id));
 					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, result->sender_id, BOAT_ACK, MPI_COMM_WORLD);
 					break;
 				}
@@ -219,7 +219,7 @@ bool Tourist::handleResponse(s_request *result, int status) {
 					}
 					ack_mutex.lock();
 					ack++;
-					if (ack == process_list.size()) {
+					if (ack + 1 == process_list.size()) {
 						event_mutex.unlock();
 					}
 					ack_mutex.unlock();
@@ -234,7 +234,7 @@ bool Tourist::handleResponse(s_request *result, int status) {
 					ack = 0;
 					s_request boat_request = create_request(capacity);
 					boat_request.clock = last_request_clock;
-					broadcastRequest(&boat_request, BOAT_REQ);
+					broadcastRequest(&boat_request, CRUISE_END);
 					break;
 				}
 				
@@ -322,15 +322,15 @@ void Tourist::monitorThread() {
 
 void Tourist::setState(int value) {
 	if (!lamport_vector.empty()) {
-			std::vector<s_request>::iterator it;
-			for (it = lamport_vector.begin(); it < lamport_vector.end(); it++) {
-				bool x = handleResponse(&(*it), it->type); 
-				// TODO: change status (status not present in scope)
-				if (x) {
-					removeFromLamportVector(it->id);
-				}
+		std::vector<s_request>::iterator it;
+		for (it = lamport_vector.begin(); it < lamport_vector.end(); it++) {
+			bool x = handleResponse(&(*it), it->type); 
+			// TODO: change status (status not present in scope)
+			if (x) {
+				removeFromLamportVector(it->id);
 			}
 		}
+	}
 		
 	state = value;
 }
@@ -345,16 +345,18 @@ void Tourist::runPerformThread() {
 		std::this_thread::sleep_for(std::chrono::milliseconds((rand()%10000) + 2000));
 		setState(SUIT_CRITICAL);
 		
-		// 3. sending costume request
-		
 		log("Requesting costume...");
-		ack = 0;
-		s_request costume_request = create_request(0);
-		broadcastRequest(&costume_request, COSTUME_REQ);
-		
-		// 4. receive costume ACK for every proc -> get a costume
-		
-		event_mutex.lock();
+		// 
+		if(costumes <= process_list.size()) {
+			ack = 0;
+			s_request costume_request = create_request(0);
+			broadcastRequest(&costume_request, COSTUME_REQ);
+			
+			// 4. receive costume ACK for every proc -> get a costume
+			
+			event_mutex.lock();
+		}
+
 		log("Received a costume!");
 		setState(BOAT_CRITICAL);
 		have_costume = 1;
@@ -372,6 +374,7 @@ void Tourist::runPerformThread() {
 		// 6. receive boat ACK -> get a boat
 		for (;;) {
 			event_mutex.lock();
+			log("Checking available space on boats");
 			bool found = false;
 			for (auto boat : boats_list) {
 				if (boat.state == 0 && boat.capacity - boat.occupied <= capacity) {
