@@ -43,7 +43,7 @@ class Tourist {
 	int have_costume;
 	
 	// 6) Lista łodzi
-	std::vector<s_boat> boats_list;
+	std::vector<s_boat*> boats_list;
 	
 	// 7) Wstrzymanie żądania
 	
@@ -65,6 +65,7 @@ class Tourist {
 	int boat_id;
 	int last_request_clock;
 	
+	bool is_last_process;
 	bool is_captain;
 	bool running;
 	
@@ -82,7 +83,7 @@ class Tourist {
 	void log(std::string msg);
 	
 public:
-	Tourist(int costumes, int boats, int tourists, int max_capacity);
+	Tourist(int costumes, int boats, int tourists);
 	void createMonitorThread();
 	void runPerformThread();
 };

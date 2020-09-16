@@ -33,7 +33,7 @@
 #define ON_BOAT 104
 
 
-Tourist::Tourist(int costumes, int boats, int tourists, int max_capacity) {
+Tourist::Tourist(int costumes, int boats, int tourists) {
 	
 	size = MPI::COMM_WORLD.Get_size();
 	rank = MPI::COMM_WORLD.Get_rank();
@@ -50,26 +50,18 @@ Tourist::Tourist(int costumes, int boats, int tourists, int max_capacity) {
 	this->event_mutex.lock();
 	this->running = true;
 	this->request_id = 0;
+	this->is_last_process = true;
 	
 	// proces madka
-	//if (rank == 0) {
-		
-		for (int i = 0; i < boats; i++) {
-			s_boat boat;
-			boat.id = i;
-			boat.capacity = 10 + 2 * i; //rand()%10+10; // 10-20
-			boat.state = 0;
-			boats_list.push_back(boat);
-		}
-		
-		/*for (int i = 1; i < size; i++)
-			MPI_Send(&boats_list, boats, MPI_UNSIGNED_LONG, i, LAUNCH, MPI_COMM_WORLD);
-	} else {
-		MPI_Recv(&boats_list, boats, MPI_UNSIGNED_LONG, MPI_ANY_SOURCE, LAUNCH, MPI_COMM_WORLD, 0);
-		for (auto x: boats_list) {
-			printf("[rank: %d, %d %d]", rank, x.id, x.capacity);
-		}
-	}*/
+	for (int i = 0; i < boats; i++) {
+		s_boat* boat = new s_boat();
+		boat->id = i;
+		boat->capacity = 10 + 2 * i; //rand()%10+10; // 10-20
+		boat->state = 0;
+		boat->occupied = 0;
+		boats_list.push_back(boat);
+	}
+	
 	this->state = PENDING;
 	log("Created a tourist!");
 }
@@ -102,13 +94,38 @@ s_request Tourist::create_request(int value) {
 s_request Tourist::create_request(int value, int value2) {
 	s_request request = create_request(value);
 	request.value2 = value2;
-	
 	return request;
 }
 
 
 bool Tourist::handleResponse(s_request *result, int status) {
 	bool resolved = true;
+
+	// Switch-case dla zachowań niezależnych od stanu procesu
+	switch(status){
+		case CRUISE: 
+		{
+			for (auto boat : boats_list) {
+				if(boat->id == result->value){
+					boat->state = 1;
+				}
+			}
+			break;
+		}
+		case CRUISE_END:
+		{
+			for (auto boat : boats_list) {
+				if(boat->id == result->value){
+					boat->occupied = 0;
+					boat->state = 0;
+					boat->tourists_list.clear();
+				}
+			}
+			break;
+		}
+	}
+
+	// Switch-case dla zachowań zależnych od stanu procesu
 	switch(state) {
 		case PENDING:
 		{
@@ -211,14 +228,21 @@ bool Tourist::handleResponse(s_request *result, int status) {
 				
 				case BOAT_ACK:
 				{
-					log("Received Boat ACK from " + std::to_string(result->sender_id));
+					log("Received Boat ACK from " + std::to_string(result->sender_id) + " with values " + std::to_string(result->value) + ", "  + std::to_string(result->value2));
 					for (auto x : boats_list) {
-						if (x.id == result->value) {
-							x.occupied += result->value2;
+						if (x->id == result->value) {
+							x->occupied += result->value2;
+							x->tourists_list.push_back(result->sender_id);
 						}
 					}
 					ack_mutex.lock();
 					ack++;
+
+					// jeśli jest jakiś proces, który nie zajął miejsca na łodzi to znaczy, że będzie proces, który da radę
+					// uruchomić rejs.
+					if (result->value == -1){			
+						this->is_last_process = false;
+					}
 					if (ack + 1 == process_list.size()) {
 						event_mutex.unlock();
 					}
@@ -228,13 +252,10 @@ bool Tourist::handleResponse(s_request *result, int status) {
 				
 				case CRUISE_END:
 				{
-					for (auto boat : boats_list) {
-						boat.occupied = 0;
-					}
 					ack = 0;
 					s_request boat_request = create_request(capacity);
 					boat_request.clock = last_request_clock;
-					broadcastRequest(&boat_request, CRUISE_END);
+					broadcastRequest(&boat_request, BOAT_REQ);
 					break;
 				}
 				
@@ -372,19 +393,27 @@ void Tourist::runPerformThread() {
 		broadcastRequest(&boat_request, BOAT_REQ);
 		
 		// 6. receive boat ACK -> get a boat
+		// for - czekanie na CRUISE_END, które wysyła jeszcze raz request o dostęp do łodzi (ze starym clockiem).
 		for (;;) {
 			event_mutex.lock();
-			log("Checking available space on boats");
+			log("Checking available space on boats. Requested space: " + std::to_string(capacity));
+			for (auto boat : boats_list){
+				printf("Boat info - id: %d, capacity: %d, occupied: %d, travellers: %ld\n", boat->id, boat->capacity, boat->occupied, boat->tourists_list.size());
+			}
 			bool found = false;
 			for (auto boat : boats_list) {
-				if (boat.state == 0 && boat.capacity - boat.occupied <= capacity) {
-					boat_id = boat.id;
+				// jeśli łódź jest w porcie i da radę na nią wejść
+				if (boat->state == 0 && boat->capacity >= capacity + boat->occupied) {
+					boat_id = boat->id;
+					boat->tourists_list.push_back(this->rank);
+					boat->occupied += capacity;
 					found = true;
 					break;
 				}
-				else if (boat.state == 0) {
-					if(boat.tourists_list.size() > 0){
-						s_request cruise_request = create_request(boat.id, boat.tourists_list[0]);
+				// jeśli łódź nie wypłynęła, ale dany proces nie zmieści się na pokładzie
+				else if (boat->state == 0) {
+					if(boat->tourists_list.size() > 0){
+						s_request cruise_request = create_request(boat->id, boat->tourists_list[0]);
 						broadcastRequest(&cruise_request, CRUISE);
 					}
 				}
@@ -394,6 +423,19 @@ void Tourist::runPerformThread() {
 			}
 		}
 		log("Boat received!");
+
+		// Jeśli żaden proces nie nadchodzi to aktywuj rejsy na łodziach sam z siebie.
+		if(this->is_last_process){
+			log("Looking for boats to dispatch...");
+			for(auto boat : boats_list){
+				// Jeśli pusta łódź jest w porcie i lista turystów nie jest pusta
+				if(boat->state == 0 && !boat->tourists_list.empty()){
+					log("Boat no. " + std::to_string(boat->id) + " is starting its cruise!");
+					s_request cruise_request = create_request(boat->id, boat->tourists_list[0]);
+					broadcastRequest(&cruise_request, CRUISE);
+				}
+			}
+		}
 		setState(ON_BOAT);
 
 		// 7. wait for cruise launch

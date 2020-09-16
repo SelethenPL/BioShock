@@ -4,7 +4,6 @@
 #define COSTUMES 4
 #define BOATS 2
 #define TOURISTS 2
-#define MAX_CAPACITY 15
 
 int main(int argc, char **argv) {
 	printf("0. Zero\n");
@@ -13,7 +12,7 @@ int main(int argc, char **argv) {
 	
 	printf("1. Init_thread\n");
 	
-	Tourist tourist(COSTUMES, BOATS, TOURISTS, MAX_CAPACITY);
+	Tourist tourist(COSTUMES, BOATS, TOURISTS);
 	printf("2. new tourist()\n");
 	tourist.createMonitorThread();
 	printf("3. createMonitorThread()\n");
