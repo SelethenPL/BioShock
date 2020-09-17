@@ -114,6 +114,7 @@ bool Tourist::handleResponse(s_request *result, int status) {
 		}
 		case CRUISE_END:
 		{
+			log("Received info about boat " + std::to_string(result->value) + " 's return");
 			for (auto boat : boats_list) {
 				if(boat->id == result->value){
 					boat->occupied = 0;
@@ -179,7 +180,8 @@ bool Tourist::handleResponse(s_request *result, int status) {
 						log("Sending Costume ACK to " + std::to_string(result->sender_id));
 						MPI_Send(&ack, sizeof(s_request), MPI_BYTE, result->sender_id, COSTUME_ACK, MPI_COMM_WORLD);
 					}
-					else { // cache
+					else {
+						log("Costume request from " + std::to_string(result->sender_id) + " suspended");
 						addToLamportVector(result);
 					}
 					break;
@@ -273,6 +275,7 @@ bool Tourist::handleResponse(s_request *result, int status) {
 			switch(status) {
 				case COSTUME_REQ:
 				{
+					log("Costume request from " + std::to_string(result->sender_id) + " suspended");
 					addToLamportVector(result);
 					break;
 				}
@@ -288,6 +291,7 @@ bool Tourist::handleResponse(s_request *result, int status) {
 				{
 					is_captain = false;
 					if(result->value == boat_id && result->value2 == rank){
+						log("Process " + std::to_string(this->rank) + " has become a captain of the boat with ID " + std::to_string(result->value));
 						is_captain = true;
 					}
 					event_mutex.unlock();
@@ -367,8 +371,10 @@ void Tourist::runPerformThread() {
 		setState(SUIT_CRITICAL);
 		
 		log("Requesting costume...");
-		// 
-		if(costumes <= process_list.size()) {
+		// if number of costumes is greater than or equal the size of process_list, 
+		// then each process can have its individual costume, therefore requesting is not 
+		// necessary
+		if(costumes < process_list.size()) {
 			ack = 0;
 			s_request costume_request = create_request(0);
 			broadcastRequest(&costume_request, COSTUME_REQ);
@@ -390,6 +396,10 @@ void Tourist::runPerformThread() {
 		ack = 0;
 		s_request boat_request = create_request(capacity);
 		last_request_clock = boat_request.clock;
+		for(auto boat: boats_list){
+			boat->occupied = 0;
+			boat->tourists_list.clear();
+		}
 		broadcastRequest(&boat_request, BOAT_REQ);
 		
 		// 6. receive boat ACK -> get a boat
@@ -413,6 +423,7 @@ void Tourist::runPerformThread() {
 				// jeśli łódź nie wypłynęła, ale dany proces nie zmieści się na pokładzie
 				else if (boat->state == 0) {
 					if(boat->tourists_list.size() > 0){
+						log("Boat no. " + std::to_string(boat->id) + " is starting its cruise!");
 						s_request cruise_request = create_request(boat->id, boat->tourists_list[0]);
 						broadcastRequest(&cruise_request, CRUISE);
 					}
@@ -422,7 +433,7 @@ void Tourist::runPerformThread() {
 				break;
 			}
 		}
-		log("Boat received!");
+		log("Boat received! Occupying " + std::to_string(capacity) + " on boat " + std::to_string(boat_id));
 
 		// Jeśli żaden proces nie nadchodzi to aktywuj rejsy na łodziach sam z siebie.
 		if(this->is_last_process){
@@ -447,6 +458,7 @@ void Tourist::runPerformThread() {
 			sleep(sleep_time);
 			s_request cruise_end_req = create_request(boat_id);
 			broadcastRequest(&cruise_end_req, CRUISE_END);
+			log("Boat " + std::to_string(boat_id) + " has finished its cruise.");
 		}
 		else {
 			event_mutex.lock();
@@ -457,6 +469,7 @@ void Tourist::runPerformThread() {
 
 		// 10. release costume and start over
 		have_costume = 0;
+		setState(PENDING);
 	}
 }
 
@@ -508,5 +521,5 @@ void Tourist::removeFromLamportVector(int id) {
 }
 
 void Tourist::log(std::string message){
-	printf("[ID: %d|Clock: %d]: %s\n", rank, clock, message.c_str());
+	printf("[ID: %d|Clock: %d|State: %d]: %s\n", rank, clock, state, message.c_str());
 }
