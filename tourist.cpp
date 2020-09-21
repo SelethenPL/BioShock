@@ -108,6 +108,10 @@ bool Tourist::handleResponse(s_request *result, int status) {
 			for (auto boat : boats_list) {
 				if(boat->id == result->value){
 					boat->state = 1;
+					if(result->value2 == rank){
+						log("Process " + std::to_string(this->rank) + " has become a captain of the boat with ID " + std::to_string(result->value));
+						this->is_captain = true;
+					}
 				}
 			}
 			break;
@@ -289,11 +293,6 @@ bool Tourist::handleResponse(s_request *result, int status) {
 
 				case CRUISE:
 				{
-					is_captain = false;
-					if(result->value == boat_id && result->value2 == rank){
-						log("Process " + std::to_string(this->rank) + " has become a captain of the boat with ID " + std::to_string(result->value));
-						is_captain = true;
-					}
 					event_mutex.unlock();
 					break;
 				}
@@ -364,7 +363,8 @@ void Tourist::runPerformThread() {
 	while(running) {
 		// perform all tasks
 		// 1. initialization
-		
+		this->is_captain = false;
+		this->is_last_process = true;
 		// 2. wait to spawn
 		
 		std::this_thread::sleep_for(std::chrono::milliseconds((rand()%10000) + 2000));
@@ -408,7 +408,7 @@ void Tourist::runPerformThread() {
 			event_mutex.lock();
 			log("Checking available space on boats. Requested space: " + std::to_string(capacity));
 			for (auto boat : boats_list){
-				printf("Boat info - id: %d, capacity: %d, occupied: %d, travellers: %ld\n", boat->id, boat->capacity, boat->occupied, boat->tourists_list.size());
+				printf("Boat info - id: %d, state: %d capacity: %d, occupied: %d, travellers: %ld\n", boat->id, boat->state, boat->capacity, boat->occupied, boat->tourists_list.size());
 			}
 			bool found = false;
 			for (auto boat : boats_list) {
@@ -434,6 +434,7 @@ void Tourist::runPerformThread() {
 			}
 		}
 		log("Boat received! Occupying " + std::to_string(capacity) + " on boat " + std::to_string(boat_id));
+		setState(ON_BOAT);
 
 		// Jeśli żaden proces nie nadchodzi to aktywuj rejsy na łodziach sam z siebie.
 		if(this->is_last_process){
@@ -444,23 +445,48 @@ void Tourist::runPerformThread() {
 					log("Boat no. " + std::to_string(boat->id) + " is starting its cruise!");
 					s_request cruise_request = create_request(boat->id, boat->tourists_list[0]);
 					broadcastRequest(&cruise_request, CRUISE);
+					boat->state = 1;
+
+					if(boat->tourists_list[0] == this->rank){
+						log("I have become a captain of the boat with id " + std::to_string(boat->id) + "!");
+						this->is_captain = true;
+					}
 				}
 			}
 		}
-		setState(ON_BOAT);
 
-		// 7. wait for cruise launch
-		event_mutex.lock();
+		// Get pointer to proper boat
+		s_boat* currentBoat;
+		for(auto boat : boats_list){
+			if(boat_id == boat->id){
+				currentBoat = boat;
+			}
+		}
+		// 7. wait for cruise launch (given it hasn't already been launched)
+		if(currentBoat){
+			if(currentBoat->state == 0){
+				event_mutex.lock();
+			}
+		}
 
 		// 8. end the cruise
 		if (is_captain) {
+			log("Waiting to announce end of the cruise");
 			int sleep_time = rand() % 3 + 3;
 			sleep(sleep_time);
 			s_request cruise_end_req = create_request(boat_id);
+			for(auto boat : boats_list){
+				if(boat->id == boat_id){
+					boat->occupied = 0;
+					boat->state = 0;
+					boat->tourists_list.clear();
+				}
+			}
 			broadcastRequest(&cruise_end_req, CRUISE_END);
 			log("Boat " + std::to_string(boat_id) + " has finished its cruise.");
 		}
 		else {
+			log("Waiting for the cruise to end");
 			event_mutex.lock();
 		}
 
@@ -469,6 +495,7 @@ void Tourist::runPerformThread() {
 
 		// 10. release costume and start over
 		have_costume = 0;
+		log("Loop finished");
 		setState(PENDING);
 	}
 }

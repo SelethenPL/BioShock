@@ -2,8 +2,8 @@
 #include "tourist.h"
 
 #define COSTUMES 4
-#define BOATS 4
-#define TOURISTS 4
+#define BOATS 2
+#define TOURISTS 2
 
 int main(int argc, char **argv) {
 	printf("0. Zero\n");
