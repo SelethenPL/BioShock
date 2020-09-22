@@ -246,9 +246,17 @@ bool Tourist::handleResponse(s_request *result, int status) {
 
 					// jeśli jest jakiś proces, który nie zajął miejsca na łodzi to znaczy, że będzie proces, który da radę
 					// uruchomić rejs.
-					if (result->value == -1){			
-						this->is_last_process = false;
+					if (result->value > -1){			
+						this->on_boat_ack++;
 					}
+
+					// jeżeli na łodziach jest tyle procesów ile strojów 
+					// albo przyszły acki od wszystkich procesów i każdy z nich jest na łodzi
+					if 	(on_boat_ack >= costumes - 1 || 
+						(ack + 1 >= process_list.size() && on_boat_ack >= ack)){
+						this->is_last_process = true;
+					}
+
 					if (ack + 1 == process_list.size()) {
 						event_mutex.unlock();
 					}
@@ -259,6 +267,12 @@ bool Tourist::handleResponse(s_request *result, int status) {
 				case CRUISE_END:
 				{
 					ack = 0;
+					on_boat_ack = 0;
+					for(auto boat: boats_list){
+						boat->occupied = 0;
+						boat->tourists_list.clear();
+					}
+
 					s_request boat_request = create_request(capacity);
 					boat_request.clock = last_request_clock;
 					broadcastRequest(&boat_request, BOAT_REQ);
@@ -364,7 +378,8 @@ void Tourist::runPerformThread() {
 		// perform all tasks
 		// 1. initialization
 		this->is_captain = false;
-		this->is_last_process = true;
+		this->is_last_process = false;
+		this->on_boat_ack = 0;
 		// 2. wait to spawn
 		
 		std::this_thread::sleep_for(std::chrono::milliseconds((rand()%10000) + 2000));

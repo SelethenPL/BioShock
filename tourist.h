@@ -52,6 +52,7 @@ class Tourist {
 	int clock;
 	std::mutex clock_mutex;
 	int ack;
+	int on_boat_ack;
 	std::mutex ack_mutex;
 	std::mutex event_mutex;
 	

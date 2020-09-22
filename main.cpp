@@ -1,9 +1,9 @@
 #include <mpi.h>
 #include "tourist.h"
 
-#define COSTUMES 4
-#define BOATS 2
-#define TOURISTS 2
+#define COSTUMES 3
+#define BOATS 3
+#define TOURISTS 4
 
 int main(int argc, char **argv) {
 	printf("0. Zero\n");
