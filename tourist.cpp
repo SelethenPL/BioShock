@@ -98,7 +98,7 @@ s_request Tourist::create_request(int value, int value2) {
 }
 
 
-bool Tourist::handleResponse(s_request *result, int status) {
+bool Tourist::handleResponse(s_request *result, int status, bool isExternal) {
 	bool resolved = true;
 
 	// Switch-case dla zachowań niezależnych od stanu procesu
@@ -107,11 +107,11 @@ bool Tourist::handleResponse(s_request *result, int status) {
 		{
 			for (auto boat : boats_list) {
 				if(boat->id == result->value){
-					boat->state = 1;
 					if(result->value2 == rank){
 						log("Process " + std::to_string(this->rank) + " has become a captain of the boat with ID " + std::to_string(result->value));
 						this->is_captain = true;
 					}
+					boat->state = 1;
 				}
 			}
 			break;
@@ -186,7 +186,8 @@ bool Tourist::handleResponse(s_request *result, int status) {
 					}
 					else {
 						log("Costume request from " + std::to_string(result->sender_id) + " suspended");
-						addToLamportVector(result);
+						if(isExternal) 
+							addToLamportVector(result);
 					}
 					break;
 				}
@@ -214,7 +215,8 @@ bool Tourist::handleResponse(s_request *result, int status) {
 				case COSTUME_REQ:
 				{
 					log("Costume request from " + std::to_string(result->sender_id) + " suspended");
-					addToLamportVector(result);
+					if(isExternal)
+						addToLamportVector(result);
 					break;
 				}
 				
@@ -222,7 +224,8 @@ bool Tourist::handleResponse(s_request *result, int status) {
 				{
 					if (result->clock > clock) { // dodaj do tablicy
 						log("Boat request from " + std::to_string(result->sender_id) + " suspended");
-						addToLamportVector(result);
+						if(isExternal)
+							addToLamportVector(result);
 					}
 					else {
 						s_request ack = create_request(-1, -1);
@@ -294,7 +297,8 @@ bool Tourist::handleResponse(s_request *result, int status) {
 				case COSTUME_REQ:
 				{
 					log("Costume request from " + std::to_string(result->sender_id) + " suspended");
-					addToLamportVector(result);
+					if(isExternal)
+						addToLamportVector(result);
 					break;
 				}
 				
@@ -348,7 +352,7 @@ void Tourist::monitorThread() {
 		MPI_Recv(&result, sizeof(s_request), MPI_BYTE, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
 		result.type = status.MPI_TAG;
 		
-		handleResponse(&result, result.type);
+		handleResponse(&result, result.type, true);
 
 		clock_mutex.lock();
 		result.id = request_id;
@@ -359,18 +363,21 @@ void Tourist::monitorThread() {
 }
 
 void Tourist::setState(int value) {
+	state = value;
+	
 	if (!lamport_vector.empty()) {
 		std::vector<s_request>::iterator it;
-		for (it = lamport_vector.begin(); it < lamport_vector.end(); it++) {
-			bool x = handleResponse(&(*it), it->type); 
+		for (it = lamport_vector.begin(); it < lamport_vector.end();) {
+			bool resolved = handleResponse(&(*it), it->type, false); 
 			// TODO: change status (status not present in scope)
-			if (x) {
+			if (resolved) {
 				removeFromLamportVector(it->id);
 			}
+			else {
+				it++;
+			}
 		}
-	}
-		
-	state = value;
+	}	
 }
 
 void Tourist::runPerformThread() {

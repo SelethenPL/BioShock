@@ -77,7 +77,7 @@ class Tourist {
 	
 	void setState(int value);
 	
-	bool handleResponse(s_request *result, int status);
+	bool handleResponse(s_request *result, int status, bool isExternal);
 	void addToLamportVector(s_request *request);
 	void removeFromLamportVector(int sender);
 	void finish_cruise(int sig);
