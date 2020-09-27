@@ -121,9 +121,9 @@ bool Tourist::handleResponse(s_request *result, int status, bool isExternal) {
 			log("Received info about boat " + std::to_string(result->value) + " 's return");
 			for (auto boat : boats_list) {
 				if(boat->id == result->value){
+					boat->tourists_list.clear();
 					boat->occupied = 0;
 					boat->state = 0;
-					boat->tourists_list.clear();
 				}
 			}
 			break;
@@ -311,7 +311,8 @@ bool Tourist::handleResponse(s_request *result, int status, bool isExternal) {
 
 				case CRUISE:
 				{
-					event_mutex.unlock();
+					if(result->value == boat_id)
+						event_mutex.unlock();
 					break;
 				}
 				
@@ -448,6 +449,7 @@ void Tourist::runPerformThread() {
 						log("Boat no. " + std::to_string(boat->id) + " is starting its cruise!");
 						s_request cruise_request = create_request(boat->id, boat->tourists_list[0]);
 						broadcastRequest(&cruise_request, CRUISE);
+						boat->state = 1;
 					}
 				}
 			}
@@ -526,11 +528,11 @@ void Tourist::runPerformThread() {
  * Function broadcasting request to every proccess.
  */
 void Tourist::broadcastRequest(s_request *request, int request_type) {
-	for (int i = 0; i < size; i++)
+	for (int i = 0; i < size; i++){
 		if (i != rank) {
 			MPI_Send(request, sizeof(s_request), MPI_BYTE, i, request_type, MPI_COMM_WORLD);
-			//printf("Broadcast %d to %d\n", rank, i);
 		}
+	}
 }
 
 /** >>Done<< (in theory should be alright)

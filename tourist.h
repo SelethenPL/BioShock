@@ -17,9 +17,9 @@ typedef struct {
 
 typedef struct {
 	int id;
-	int type; // ???
-	int value; // 1) typ wiadomości
-	int value2; // 2) zawartość wiadomości
+	int type; // 1) typ wiadomości
+	int value; // 2) zawartość wiadomości
+	int value2; // cd.
 	int sender_id; // 3) numer id obiektu wysyłającego
 	int clock;
 } s_request;
