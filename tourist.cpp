@@ -239,7 +239,7 @@ bool Tourist::handleResponse(s_request *result, int status, bool isExternal) {
 				{
 					log("Received Boat ACK from " + std::to_string(result->sender_id) + " with values " + std::to_string(result->value) + ", "  + std::to_string(result->value2));
 					for (auto x : boats_list) {
-						if (x->id == result->value) {
+						if (x->id == result->value && result->value2 > 0) {
 							x->occupied += result->value2;
 							x->tourists_list.push_back(result->sender_id);
 						}
@@ -304,7 +304,14 @@ bool Tourist::handleResponse(s_request *result, int status, bool isExternal) {
 				
 				case BOAT_REQ:
 				{
-					s_request ack = create_request(boat_id, capacity); // (boat id, size)
+					// aby rozróżnić przypadek gdy proces jest na łodzi będącej w porcie bądź na łodzi wypłyniętej w rejs
+					int payload = capacity;
+					for(auto boat : boats_list){
+						if (boat->id == boat_id && boat->state == 1){
+							payload = -1;
+						}
+					}
+					s_request ack = create_request(boat_id, payload); // (boat id, size)
 					MPI_Send(&ack, sizeof(s_request), MPI_BYTE, result->sender_id, BOAT_ACK, MPI_COMM_WORLD);
 					break;
 				}
