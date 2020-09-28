@@ -50,7 +50,7 @@ Tourist::Tourist(int costumes, int boats, int tourists) {
 	this->event_mutex.lock();
 	this->running = true;
 	this->request_id = 0;
-	this->is_last_process = true;
+	this->is_last_process = false;
 	
 	// proces madka
 	for (int i = 0; i < boats; i++) {
@@ -435,7 +435,9 @@ void Tourist::runPerformThread() {
 		// 6. receive boat ACK -> get a boat
 		// for - czekanie na CRUISE_END, które wysyła jeszcze raz request o dostęp do łodzi (ze starym clockiem).
 		for (;;) {
-			event_mutex.lock();
+			if(process_list.size() > 1){
+				event_mutex.lock();
+			}
 			log("Checking available space on boats. Requested space: " + std::to_string(capacity));
 			for (auto boat : boats_list){
 				printf("Boat info - id: %d, state: %d capacity: %d, occupied: %d, travellers: %ld\n", boat->id, boat->state, boat->capacity, boat->occupied, boat->tourists_list.size());
@@ -466,6 +468,9 @@ void Tourist::runPerformThread() {
 		}
 		log("Boat received! Occupying " + std::to_string(capacity) + " on boat " + std::to_string(boat_id));
 		setState(ON_BOAT);
+		if(process_list.size() <= 1){
+			this->is_last_process = true;
+		}
 
 		// Jeśli żaden proces nie nadchodzi to aktywuj rejsy na łodziach sam z siebie.
 		if(this->is_last_process){
